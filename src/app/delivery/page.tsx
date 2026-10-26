@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useDeliverySession } from "@/context/delivery-session-context";
 import { DemoModeNotice } from "@/components/delivery/DemoModeNotice";
 import { DeliveryLoginForm } from "@/components/delivery/DeliveryLoginForm";
+import { SiteFooter } from "@/components/delivery/SiteFooter";
 import logo from "../../../LOGO.jpeg";
 
 export default function DeliveryEntryPage() {
@@ -32,6 +33,7 @@ export default function DeliveryEntryPage() {
           <p className="mt-6 text-center text-xs text-app-muted">Authorized delivery partners only</p>
         </div>
       </main>
+      <SiteFooter />
     </div>
   );
 }

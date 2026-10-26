@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { DeliveryHeader } from "@/components/delivery/DeliveryHeader";
 import { DeliveryMobileNav } from "@/components/delivery/DeliveryMobileNav";
 import { DemoModeNotice } from "@/components/delivery/DemoModeNotice";
+import { SiteFooter } from "@/components/delivery/SiteFooter";
 import { Toast } from "@/components/feedback/Toast";
 import { useDeliverySession } from "@/context/delivery-session-context";
 
@@ -26,6 +27,7 @@ export function DeliveryAppShell({ children }: { children: ReactNode }) {
       <DemoModeNotice />
       <DeliveryHeader />
       <main className="flex-1 px-4 py-4 sm:px-6">{children}</main>
+      <SiteFooter />
       <DeliveryMobileNav />
       <Toast message={notice} onDismiss={clearNotice} tone="success" />
     </div>
