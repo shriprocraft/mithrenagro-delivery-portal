@@ -13,3 +13,8 @@ export function findDemoPartnerId(email: string, password: string): string | nul
   if (!account || password !== DEMO_PARTNER_PASSWORD) return null;
   return account.partner_id;
 }
+
+// Returns the demo sign-in email linked to a partner, for display on the profile only.
+export function getDemoAccountEmail(partnerId: string): string | undefined {
+  return demoPartnerAccounts.find((a) => a.partner_id === partnerId)?.email;
+}

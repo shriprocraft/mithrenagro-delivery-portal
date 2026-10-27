@@ -10,7 +10,7 @@ import { Toast } from "@/components/feedback/Toast";
 import { useDeliverySession } from "@/context/delivery-session-context";
 
 export function DeliveryAppShell({ children }: { children: ReactNode }) {
-  const { isSignedIn, notice, clearNotice } = useDeliverySession();
+  const { isSignedIn, toast, clearToast } = useDeliverySession();
   const router = useRouter();
 
   // Every signed-in delivery page renders inside this shell, so this one check keeps
@@ -26,10 +26,10 @@ export function DeliveryAppShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen flex-col bg-app-bg">
       <DemoModeNotice />
       <DeliveryHeader />
-      <main className="flex-1 px-4 py-4 sm:px-6">{children}</main>
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-4 sm:px-6 sm:py-6">{children}</main>
       <SiteFooter />
       <DeliveryMobileNav />
-      <Toast message={notice} onDismiss={clearNotice} tone="success" />
+      <Toast toast={toast} onDismiss={clearToast} />
     </div>
   );
 }

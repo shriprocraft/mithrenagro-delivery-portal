@@ -2,8 +2,10 @@
 
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
+import { useDeliverySession } from "@/context/delivery-session-context";
 import { EyeIcon, EyeOffIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
+import { simulateLatency } from "@/lib/simulated-latency";
 import { findDemoPartnerId } from "@/services/mock-auth";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -30,20 +32,31 @@ export function DeliveryLoginForm({ onSignIn }: { onSignIn: (partnerId: string) 
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const { showToast } = useDeliverySession();
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setFormError(null);
 
     const nextErrors = validate(email, password);
     setErrors(nextErrors);
-    if (nextErrors.email || nextErrors.password) return;
+    if (nextErrors.email || nextErrors.password) {
+      showToast("Please fix the highlighted fields to sign in.", "error");
+      return;
+    }
 
+    setSubmitting(true);
+    await simulateLatency();
     // Prototype check against demo fixtures only — see src/services/mock-auth.ts.
     const partnerId = findDemoPartnerId(email, password);
     if (!partnerId || !onSignIn(partnerId)) {
+      setSubmitting(false);
       setFormError("Email or password is incorrect.");
+      showToast("Sign-in failed. Check your email and password.", "error");
     }
+    // On success the entry page redirects, so the button stays in its loading state.
   }
 
   return (
@@ -64,7 +77,12 @@ export function DeliveryLoginForm({ onSignIn }: { onSignIn: (partnerId: string) 
           autoComplete="email"
           placeholder="arjunagro@gmail.com"
           value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          onChange={(event) => {
+            setEmail(event.target.value);
+            if (errors.email) setErrors((prev) => ({ ...prev, email: undefined }));
+          }}
+          disabled={submitting}
+          maxLength={254}
           aria-invalid={errors.email ? true : undefined}
           aria-describedby={errors.email ? "login-email-error" : undefined}
           className={cn(inputClasses, errors.email ? "border-danger" : "border-app-muted/40")}
@@ -87,7 +105,12 @@ export function DeliveryLoginForm({ onSignIn }: { onSignIn: (partnerId: string) 
             autoComplete="current-password"
             placeholder="demo123"
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
+            }}
+            disabled={submitting}
+            maxLength={128}
             aria-invalid={errors.password ? true : undefined}
             aria-describedby={errors.password ? "login-password-error" : undefined}
             className={cn(inputClasses, "pr-11", errors.password ? "border-danger" : "border-app-muted/40")}
@@ -108,8 +131,8 @@ export function DeliveryLoginForm({ onSignIn }: { onSignIn: (partnerId: string) 
         )}
       </div>
 
-      <Button type="submit" className="mt-2 w-full">
-        Sign In
+      <Button type="submit" className="mt-2 w-full" loading={submitting}>
+        {submitting ? "Signing in…" : "Sign In"}
       </Button>
     </form>
   );

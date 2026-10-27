@@ -7,10 +7,11 @@ import { useDeliverySession } from "@/context/delivery-session-context";
 import { DemoModeNotice } from "@/components/delivery/DemoModeNotice";
 import { DeliveryLoginForm } from "@/components/delivery/DeliveryLoginForm";
 import { SiteFooter } from "@/components/delivery/SiteFooter";
+import { Toast } from "@/components/feedback/Toast";
 import logo from "../../../LOGO.jpeg";
 
 export default function DeliveryEntryPage() {
-  const { isSignedIn, signIn } = useDeliverySession();
+  const { isSignedIn, signIn, toast, clearToast } = useDeliverySession();
   const router = useRouter();
 
   useEffect(() => {
@@ -34,6 +35,7 @@ export default function DeliveryEntryPage() {
         </div>
       </main>
       <SiteFooter />
+      <Toast toast={toast} onDismiss={clearToast} />
     </div>
   );
 }

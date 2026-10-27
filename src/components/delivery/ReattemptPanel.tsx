@@ -4,10 +4,22 @@ import { useState } from "react";
 import type { DeliveryJob } from "@/types/delivery";
 import { Button } from "@/components/ui/Button";
 import { useDeliverySession } from "@/context/delivery-session-context";
+import { simulateLatency } from "@/lib/simulated-latency";
+import type { MockActionResult } from "@/services/delivery-service";
 
-export function ReattemptPanel({ job, onActionSuccess }: { job: DeliveryJob; onActionSuccess: (message: string) => void }) {
-  const { reattemptJob, returnJob } = useDeliverySession();
-  const [error, setError] = useState<string | null>(null);
+export function ReattemptPanel({ job }: { job: DeliveryJob }) {
+  const { reattemptJob, returnJob, showToast } = useDeliverySession();
+  const [pending, setPending] = useState<"reattempt" | "return" | null>(null);
+
+  async function runAction(action: "reattempt" | "return", perform: () => MockActionResult, successMessage: string) {
+    if (pending) return;
+    setPending(action);
+    await simulateLatency();
+    const result = perform();
+    setPending(null);
+    if (result.error) showToast(result.error, "error");
+    else showToast(successMessage);
+  }
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-danger/30 bg-danger/5 p-4">
@@ -17,30 +29,21 @@ export function ReattemptPanel({ job, onActionSuccess }: { job: DeliveryJob; onA
       <p className="text-xs text-app-muted">
         Reattempts so far: {job.reattempt_count} (simulated — no maximum is enforced in this demo).
       </p>
-      {error && <p className="text-sm text-danger">{error}</p>}
       <div className="flex flex-col gap-2 sm:flex-row">
         <Button
-          onClick={() => {
-            const result = reattemptJob(job.id);
-            if (result.error) setError(result.error);
-            else {
-              setError(null);
-              onActionSuccess("Reattempt recorded (simulated). Delivery re-queued.");
-            }
-          }}
+          loading={pending === "reattempt"}
+          disabled={pending !== null}
+          onClick={() =>
+            runAction("reattempt", () => reattemptJob(job.id), "Reattempt recorded (simulated). Delivery re-queued.")
+          }
         >
           Reattempt delivery
         </Button>
         <Button
           variant="secondary"
-          onClick={() => {
-            const result = returnJob(job.id);
-            if (result.error) setError(result.error);
-            else {
-              setError(null);
-              onActionSuccess("Delivery marked returned (simulated).");
-            }
-          }}
+          loading={pending === "return"}
+          disabled={pending !== null}
+          onClick={() => runAction("return", () => returnJob(job.id), "Delivery marked returned (simulated).")}
         >
           Mark returned
         </Button>

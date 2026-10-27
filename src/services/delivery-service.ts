@@ -38,7 +38,7 @@ export function getDeliveryJobById(
   return job;
 }
 
-function lastEventAt(job: DeliveryJob): string {
+export function lastEventAt(job: DeliveryJob): string {
   return job.status_history[job.status_history.length - 1]?.at ?? job.assigned_at;
 }
 

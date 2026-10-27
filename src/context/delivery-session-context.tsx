@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import type { DeliveryJob, DeliveryPartnerProfile, DeliveryStatus } from "@/types/delivery";
+import type { ToastMessage, ToastTone } from "@/components/feedback/Toast";
 import { demoDeliveryPartners } from "@/data/delivery-partner";
 import { demoDeliveryJobs } from "@/data/delivery-jobs";
 import {
@@ -35,9 +36,12 @@ interface DeliverySessionValue {
   toggleAvailability: () => void;
   signIn: (partnerId: string) => boolean;
   signOut: () => void;
-  // One-off message (e.g. after sign-in) shown as a toast by the app shell.
-  notice: string | null;
-  clearNotice: () => void;
+  // App-wide toast, rendered by the app shell and the sign-in screen. Living here (not in
+  // individual components) keeps a toast visible even when the component that raised it
+  // re-renders into a different branch, e.g. after a status change.
+  toast: ToastMessage | null;
+  showToast: (message: string, tone?: ToastTone) => void;
+  clearToast: () => void;
 }
 
 const DeliverySessionContext = createContext<DeliverySessionValue | null>(null);
@@ -48,7 +52,7 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
   // Demo-only client state. Nothing here is persisted to a server; it resets on reload,
   // so the portal always starts signed out on the /delivery sign-in screen.
   const [partnerId, setPartnerId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
   const [partners, setPartners] = useState<DeliveryPartnerProfile[]>(demoDeliveryPartners);
   const [jobs, setJobs] = useState<DeliveryJob[]>(demoDeliveryJobs);
 
@@ -115,10 +119,14 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
     );
   }, [partnerId]);
 
+  const showToast = useCallback((message: string, tone: ToastTone = "success") => {
+    setToast({ id: Date.now(), message, tone });
+  }, []);
+
   const signOut = useCallback(() => {
     setPartnerId(null);
-    setNotice(null);
-  }, []);
+    showToast("Signed out of the demo session.");
+  }, [showToast]);
 
   // Starts a mock session for an explicit demo partner. Credential checks live in
   // src/services/mock-auth.ts; this only accepts IDs that exist in the demo fixtures.
@@ -126,13 +134,13 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
     (nextPartnerId: string) => {
       if (!partners.some((p) => p.id === nextPartnerId)) return false;
       setPartnerId(nextPartnerId);
-      setNotice("Signed in to the demo session.");
+      showToast("Signed in to the demo session.");
       return true;
     },
-    [partners]
+    [partners, showToast]
   );
 
-  const clearNotice = useCallback(() => setNotice(null), []);
+  const clearToast = useCallback(() => setToast(null), []);
 
   const value: DeliverySessionValue = {
     isSignedIn: partnerId !== null,
@@ -147,8 +155,9 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
     toggleAvailability,
     signIn,
     signOut,
-    notice,
-    clearNotice,
+    toast,
+    showToast,
+    clearToast,
   };
 
   return <DeliverySessionContext.Provider value={value}>{children}</DeliverySessionContext.Provider>;
