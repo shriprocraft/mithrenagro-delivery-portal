@@ -1,9 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useDeliverySession } from "@/context/delivery-session-context";
 import { Badge } from "@/components/ui/Badge";
 import { UserIcon } from "@/components/ui/icons";
+import logo from "../../../LOGO.png";
 
 export function DeliveryHeader() {
   const { partner } = useDeliverySession();
@@ -11,9 +13,12 @@ export function DeliveryHeader() {
   return (
     <header className="border-b border-app-border bg-surface">
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-3 sm:px-6">
-        <div>
-          <p className="text-sm font-semibold text-app-text">Mithren Agro</p>
-          <p className="text-xs text-app-muted">Delivery Partner Portal</p>
+        <div className="flex items-center gap-3">
+          <Image src={logo} alt="" aria-hidden priority sizes="80px" className="h-9 w-auto" />
+          <div>
+            <p className="text-sm font-semibold text-app-text">Mithren Agro</p>
+            <p className="text-xs text-app-muted">Delivery Partner Portal</p>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           {partner && (
