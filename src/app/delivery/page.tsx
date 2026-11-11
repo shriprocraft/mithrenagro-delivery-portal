@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useDeliverySession } from "@/context/delivery-session-context";
 import { DemoModeNotice } from "@/components/delivery/DemoModeNotice";
@@ -31,7 +32,16 @@ export default function DeliveryEntryPage() {
             <h1 className="mt-1 text-base font-semibold text-app-text">Delivery Partner Portal</h1>
           </div>
           <DeliveryLoginForm onSignIn={signIn} />
-          <p className="mt-6 text-center text-xs text-app-muted">Authorized delivery partners only</p>
+          <p className="mt-5 text-center text-sm text-app-muted">
+            Don’t have an account?{" "}
+            <Link
+              href="/delivery/register"
+              className="rounded-sm font-medium text-primary hover:text-primary-dark hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              Register as Delivery Partner
+            </Link>
+          </p>
+          <p className="mt-3 text-center text-xs text-app-muted">Authorized delivery partners only</p>
         </div>
       </main>
       <SiteFooter />

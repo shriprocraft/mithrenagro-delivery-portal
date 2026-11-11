@@ -18,7 +18,21 @@ npm install
 npm run dev
 ```
 
-Then open <http://localhost:3000/delivery>.
+Then open <http://127.0.0.1:3000/delivery>. The dev server always uses port 3000 on
+127.0.0.1 (`next dev -H 127.0.0.1 -p 3000`).
+
+## Backend
+
+The portal talks to the shared Mithren Agro FastAPI backend (`mithren-agro-backend`), on
+<http://127.0.0.1:8000> by default:
+
+```bash
+cp .env.example .env.local   # NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+```
+
+All requests go through `src/config/api.ts` (`apiUrl()` / `apiFetch()`). The backend has
+no delivery-partner endpoints yet, so the screens still use demo data; `DELIVERY_API` in
+that file lists the endpoints each screen needs.
 
 The demo signs you in as a fixed mock partner ("Arjun Kumar", `partner-001`). A second
 fictional partner (`partner-002`) exists only in the fixtures to prove job/history
