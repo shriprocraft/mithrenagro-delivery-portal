@@ -16,6 +16,8 @@ export interface DeliveryRegistrationInput {
   ifsc: string;
   identity_type: IdentityType;
   identity_number: string;
+  // From verifyPhoneOtp(); registration uses it up.
+  phone_verification_token: string;
 }
 
 export interface DeliveryPartnerProfile {
@@ -43,7 +45,7 @@ interface DeliveryAuthResponse {
   partner: DeliveryPartnerProfile;
 }
 
-export type RegistrationField = keyof DeliveryRegistrationInput;
+export type RegistrationField = Exclude<keyof DeliveryRegistrationInput, "phone_verification_token"> | "code";
 
 export class RegistrationError extends Error {
   constructor(
@@ -71,17 +73,46 @@ export async function registerDeliveryPartner(input: DeliveryRegistrationInput):
     }
     return response.partner;
   } catch (error) {
-    if (!(error instanceof ApiRequestError)) {
-      throw new RegistrationError("We couldn’t reach the Mithren Agro server. Check your connection and try again.");
-    }
-    throw toRegistrationError(error);
+    throw error instanceof ApiRequestError ? toRegistrationError(error) : unreachable();
   }
 }
 
 const FIELDS: RegistrationField[] = [
   "full_name", "email", "phone", "password", "vehicle_type", "vehicle_number",
-  "driving_license", "bank_account", "ifsc", "identity_type", "identity_number",
+  "driving_license", "bank_account", "ifsc", "identity_type", "identity_number", "code",
 ];
+
+export interface SentOtp {
+  expires_in: number;
+  resend_in: number;
+  // Only when the backend runs with DELIVERY_OTP_SENDER=dev (no SMS provider is connected yet).
+  dev_code?: string | null;
+}
+
+/** POST /delivery/auth/send-otp: texts a 6-digit code to the number. */
+export async function sendPhoneOtp(phone: string): Promise<SentOtp> {
+  try {
+    return await apiFetch<SentOtp>(DELIVERY_API.sendOtp, { method: "POST", body: { phone } });
+  } catch (error) {
+    throw error instanceof ApiRequestError ? toRegistrationError(error) : unreachable();
+  }
+}
+
+/** POST /delivery/auth/verify-otp: returns the token that registration needs. */
+export async function verifyPhoneOtp(phone: string, code: string): Promise<string> {
+  try {
+    const r = await apiFetch<{ phone_verification_token: string }>(DELIVERY_API.verifyOtp, {
+      method: "POST",
+      body: { phone, code },
+    });
+    return r.phone_verification_token;
+  } catch (error) {
+    throw error instanceof ApiRequestError ? toRegistrationError(error) : unreachable();
+  }
+}
+
+const unreachable = () =>
+  new RegistrationError("We couldn’t reach the Mithren Agro server. Check your connection and try again.");
 
 function toRegistrationError(error: ApiRequestError): RegistrationError {
   const detail = (error.body as { detail?: unknown } | null)?.detail;

@@ -8,6 +8,8 @@ import { cn } from "@/lib/cn";
 import {
   registerDeliveryPartner,
   RegistrationError,
+  sendPhoneOtp,
+  verifyPhoneOtp,
   type DeliveryPartnerProfile,
   type DeliveryRegistrationInput,
   type IdentityType,
@@ -18,16 +20,19 @@ import {
 // Same rules as the backend (app/schemas/delivery.py), so most mistakes are caught before sending.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^(?:\+?91)?([6-9]\d{9})$/;
-const VEHICLE_NUMBER_PATTERN = /^(?:[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{4}|[0-9]{2}BH[0-9]{4}[A-Z]{1,2})$/;
+// Tamil Nadu (TN 33 AB 1234) or Bharat series (22 BH 1234 AA) registrations.
+const VEHICLE_NUMBER_PATTERN = /^(?:TN[0-9]{2}[A-Z]{1,2}[0-9]{4}|[0-9]{2}BH[0-9]{4}[A-Z]{1,2})$/;
 const DRIVING_LICENSE_PATTERN = /^[A-Z]{2}[0-9A-Z]{8,14}$/;
 const ACCOUNT_PATTERN = /^\d{9,18}$/;
 const IFSC_PATTERN = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const AADHAAR_PATTERN = /^[2-9]\d{11}$/;
 const PAN_PATTERN = /^[A-Z]{5}\d{4}[A-Z]$/;
+const CODE_PATTERN = /^\d{6}$/;
 
 const compact = (value: string) => value.replace(/[\s-]/g, "").toUpperCase();
+const phoneDigits = (value: string) => PHONE_PATTERN.exec(value.replace(/[\s-]/g, ""))?.[1] ?? null;
 
-type Values = DeliveryRegistrationInput;
+type Values = Omit<DeliveryRegistrationInput, "phone_verification_token">;
 type Errors = Partial<Record<RegistrationField, string>>;
 
 const EMPTY: Values = {
@@ -70,14 +75,15 @@ function validate(values: Values, fields: RegistrationField[]): Errors {
   if (v.password.length < 10 || !/[A-Za-z]/.test(v.password) || !/\d/.test(v.password))
     all.password = "Use at least 10 characters with letters and numbers.";
   if (!VEHICLE_NUMBER_PATTERN.test(compact(v.vehicle_number)))
-    all.vehicle_number = "Enter the registration number, like TN 33 AB 1234.";
+    all.vehicle_number = "Enter a Tamil Nadu (TN 33 AB 1234) or BH series (22 BH 1234 AA) number.";
   if (!DRIVING_LICENSE_PATTERN.test(compact(v.driving_license)))
     all.driving_license = "Enter the driving licence number, like TN33 20190001234.";
   if (!ACCOUNT_PATTERN.test(v.bank_account.replace(/[\s-]/g, ""))) all.bank_account = "Account number should be 9 to 18 digits.";
   if (!IFSC_PATTERN.test(compact(v.ifsc))) all.ifsc = "IFSC should look like HDFC0001234.";
   const id = compact(v.identity_number);
-  if (v.identity_type === "aadhaar" && !AADHAAR_PATTERN.test(id)) all.identity_number = "Aadhaar number should be 12 digits.";
-  if (v.identity_type === "pan" && !PAN_PATTERN.test(id)) all.identity_number = "PAN should look like ABCDE1234F.";
+  if (v.identity_type === "aadhaar" && !AADHAAR_PATTERN.test(id)) all.identity_number = "Aadhaar number should be exactly 12 digits.";
+  if (v.identity_type === "pan" && !PAN_PATTERN.test(id))
+    all.identity_number = "PAN should be 5 letters, 4 digits and a letter, like ABCDE1234F.";
   return Object.fromEntries(Object.entries(all).filter(([key]) => fields.includes(key as RegistrationField)));
 }
 
@@ -158,6 +164,67 @@ export function DeliveryRegistrationForm() {
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [registered, setRegistered] = useState<DeliveryPartnerProfile | null>(null);
+  // Mobile OTP: send a code, enter it, and keep the verification token for registering.
+  const [otp, setOtp] = useState<{
+    status: "idle" | "sending" | "sent" | "verifying" | "verified";
+    code: string;
+    devCode: string | null;
+    resendAt: number;
+    token: string | null;
+    phone: string | null;
+  }>({ status: "idle", code: "", devCode: null, resendAt: 0, token: null, phone: null });
+  const [clock, setClock] = useState(() => Date.now());
+  const resendIn = Math.max(0, Math.ceil((otp.resendAt - clock) / 1000));
+  const phoneVerified = otp.status === "verified" && otp.phone === phoneDigits(values.phone);
+
+  // Ticks once a second while a resend countdown is showing.
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const timer = setTimeout(() => setClock(Date.now()), 1000);
+    return () => clearTimeout(timer);
+  }, [resendIn, clock]);
+
+  function resetOtp() {
+    setOtp({ status: "idle", code: "", devCode: null, resendAt: 0, token: null, phone: null });
+  }
+
+  async function sendCode() {
+    const digits = phoneDigits(values.phone);
+    if (!digits) {
+      setErrors((prev) => ({ ...prev, phone: "Enter a 10-digit Indian mobile number." }));
+      return;
+    }
+    setErrors((prev) => ({ ...prev, phone: undefined, code: undefined }));
+    setOtp((prev) => ({ ...prev, status: "sending" }));
+    try {
+      const sent = await sendPhoneOtp(digits);
+      const now = Date.now();
+      setClock(now);
+      setOtp({ status: "sent", code: "", devCode: sent.dev_code ?? null, resendAt: now + sent.resend_in * 1000, token: null, phone: digits });
+    } catch (error) {
+      const e = error instanceof RegistrationError ? error : new RegistrationError("Couldn’t send the code. Try again.");
+      setErrors((prev) => ({ ...prev, phone: e.fieldErrors.phone ?? e.message }));
+      setOtp((prev) => ({ ...prev, status: prev.phone ? "sent" : "idle" }));
+    }
+  }
+
+  async function verifyCode() {
+    if (!otp.phone) return;
+    if (!CODE_PATTERN.test(otp.code.trim())) {
+      setErrors((prev) => ({ ...prev, code: "Enter the 6-digit code." }));
+      return;
+    }
+    setErrors((prev) => ({ ...prev, code: undefined }));
+    setOtp((prev) => ({ ...prev, status: "verifying" }));
+    try {
+      const token = await verifyPhoneOtp(otp.phone, otp.code.trim());
+      setOtp((prev) => ({ ...prev, status: "verified", token, devCode: null }));
+    } catch (error) {
+      const e = error instanceof RegistrationError ? error : new RegistrationError("Couldn’t check the code. Try again.");
+      setErrors((prev) => ({ ...prev, code: e.fieldErrors.code ?? e.message }));
+      setOtp((prev) => ({ ...prev, status: "sent" }));
+    }
+  }
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   // Move focus to the step heading so keyboard and screen-reader users follow the step change
@@ -168,13 +235,14 @@ export function DeliveryRegistrationForm() {
     mounted.current = true;
   }, [step, registered]);
 
-  function set<K extends RegistrationField>(key: K, value: Values[K]) {
+  function set<K extends keyof Values>(key: K, value: Values[K]) {
     setValues((prev) => ({ ...prev, [key]: value }));
     if (errors[key]) setErrors((prev) => ({ ...prev, [key]: undefined }));
   }
 
   function next() {
     const stepErrors = validate(values, STEPS[step].fields);
+    if (step === 0 && !stepErrors.phone && !phoneVerified) stepErrors.phone = "Verify your mobile number to continue.";
     setErrors(stepErrors);
     if (Object.keys(stepErrors).length === 0) {
       setFormError(null);
@@ -188,6 +256,7 @@ export function DeliveryRegistrationForm() {
     if (submitting) return;
     setFormError(null);
     const allErrors = validate(values, STEPS.flatMap((s) => s.fields));
+    if (!allErrors.phone && (!phoneVerified || !otp.token)) allErrors.phone = "Verify your mobile number to continue.";
     setErrors(allErrors);
     const firstBad = STEPS.findIndex((s) => s.fields.some((f) => allErrors[f]));
     if (firstBad !== -1) {
@@ -205,12 +274,15 @@ export function DeliveryRegistrationForm() {
           driving_license: compact(values.driving_license),
           ifsc: compact(values.ifsc),
           identity_number: compact(values.identity_number),
+          phone_verification_token: otp.token!,
         })
       );
     } catch (error) {
       const e = error instanceof RegistrationError ? error : new RegistrationError("Registration failed. Please try again.");
       setFormError(e.message);
       setErrors(e.fieldErrors);
+      // The verification was refused or expired: the number has to be verified again.
+      if (e.fieldErrors.phone) resetOtp();
       // Go back to the first step with a field the server refused (for example, an email already in use).
       const bad = STEPS.findIndex((s) => s.fields.some((f) => e.fieldErrors[f]));
       if (bad !== -1) setStep(bad);
@@ -286,14 +358,98 @@ export function DeliveryRegistrationForm() {
                 <input {...p} autoComplete="name" placeholder="Arjun Kumar" maxLength={80} value={values.full_name} onChange={(e) => set("full_name", e.target.value)} />
               )}
             </Field>
-            <Field id="phone" label="Mobile number" error={errors.phone}>
+            <Field
+              id="phone"
+              label="Mobile number"
+              error={errors.phone}
+              hint={phoneVerified ? undefined : "We’ll text a 6-digit code to verify this number."}
+            >
               {(p) => (
-                <div className="flex">
-                  <span className="inline-flex items-center rounded-l-md border border-r-0 border-app-muted/40 bg-app-bg px-3 text-sm text-app-muted">+91</span>
-                  <input {...p} className={cn(p.className, "rounded-l-none")} type="tel" inputMode="numeric" autoComplete="tel-national" placeholder="98400 12345" maxLength={14} value={values.phone} onChange={(e) => set("phone", e.target.value)} />
+                <div className="flex gap-2">
+                  <div className="flex min-w-0 flex-1">
+                    <span className="inline-flex items-center rounded-l-md border border-r-0 border-app-muted/40 bg-app-bg px-3 text-sm text-app-muted">+91</span>
+                    <input
+                      {...p}
+                      className={cn(p.className, "rounded-l-none", phoneVerified && "border-primary bg-primary-light/40")}
+                      type="tel"
+                      inputMode="numeric"
+                      autoComplete="tel-national"
+                      placeholder="98400 12345"
+                      maxLength={14}
+                      value={values.phone}
+                      readOnly={phoneVerified}
+                      onChange={(e) => {
+                        set("phone", e.target.value);
+                        if (otp.status !== "idle") resetOtp();
+                      }}
+                    />
+                  </div>
+                  {phoneVerified ? (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-primary-light px-3 text-sm font-medium text-primary-dark" role="status">
+                      <CheckCircleIcon className="h-4 w-4" /> Verified
+                    </span>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="shrink-0 px-3"
+                      loading={otp.status === "sending"}
+                      disabled={resendIn > 0 || otp.status === "verifying"}
+                      onClick={sendCode}
+                    >
+                      {otp.status === "idle" || otp.status === "sending" ? "Send code" : resendIn > 0 ? `Resend in ${resendIn}s` : "Resend"}
+                    </Button>
+                  )}
                 </div>
               )}
             </Field>
+            {phoneVerified && (
+              <button
+                type="button"
+                onClick={() => { resetOtp(); setErrors((prev) => ({ ...prev, phone: undefined })); }}
+                className="-mt-3 self-start rounded-sm text-xs font-medium text-primary hover:text-primary-dark hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                Change number
+              </button>
+            )}
+            {!phoneVerified && (otp.status === "sent" || otp.status === "verifying") && (
+              <div className="-mt-1 flex flex-col gap-2 rounded-md border border-app-border bg-app-bg p-3">
+                <Field id="code" label={`Enter the code sent to +91 ${otp.phone?.replace(/(\d{5})(\d{5})/, "$1 $2")}`} error={errors.code}>
+                  {(p) => (
+                    <div className="flex gap-2">
+                      <input
+                        {...p}
+                        className={cn(p.className, "min-w-0 flex-1 tracking-[0.4em]")}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        placeholder="••••••"
+                        maxLength={6}
+                        value={otp.code}
+                        onChange={(e) => {
+                          setOtp((prev) => ({ ...prev, code: e.target.value.replace(/\D/g, "") }));
+                          if (errors.code) setErrors((prev) => ({ ...prev, code: undefined }));
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            void verifyCode();
+                          }
+                        }}
+                      />
+                      <Button type="button" className="shrink-0 px-4" loading={otp.status === "verifying"} onClick={verifyCode}>
+                        Verify
+                      </Button>
+                    </div>
+                  )}
+                </Field>
+                {otp.devCode && (
+                  <p className="text-xs text-app-muted">
+                    Test mode (no SMS provider connected yet): your code is{" "}
+                    <span className="font-semibold tracking-widest text-app-text">{otp.devCode}</span>
+                  </p>
+                )}
+              </div>
+            )}
             <Field id="email" label="Email address" error={errors.email}>
               {(p) => (
                 <input {...p} type="email" autoComplete="email" placeholder="arjun@example.com" maxLength={254} value={values.email} onChange={(e) => set("email", e.target.value)} />
@@ -341,7 +497,7 @@ export function DeliveryRegistrationForm() {
             </fieldset>
             <Field id="vehicle_number" label="Vehicle registration number" error={errors.vehicle_number}>
               {(p) => (
-                <input {...p} className={cn(p.className, "uppercase")} autoComplete="off" placeholder="TN 33 AB 1234" maxLength={16} value={values.vehicle_number} onChange={(e) => set("vehicle_number", e.target.value)} />
+                <input {...p} className={cn(p.className, "uppercase")} autoComplete="off" placeholder="TN 33 AB 1234 or 22 BH 1234 AA" maxLength={16} value={values.vehicle_number} onChange={(e) => set("vehicle_number", e.target.value)} />
               )}
             </Field>
             <Field id="driving_license" label="Driving licence number" error={errors.driving_license}>
