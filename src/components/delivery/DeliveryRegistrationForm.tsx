@@ -5,11 +5,10 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { Button } from "@/components/ui/Button";
 import { CheckCircleIcon, EyeIcon, EyeOffIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
+import { OtpVerifier } from "@/components/delivery/OtpVerifier";
 import {
   registerDeliveryPartner,
   RegistrationError,
-  sendPhoneOtp,
-  verifyPhoneOtp,
   type DeliveryPartnerProfile,
   type DeliveryRegistrationInput,
   type IdentityType,
@@ -27,12 +26,12 @@ const ACCOUNT_PATTERN = /^\d{9,18}$/;
 const IFSC_PATTERN = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const AADHAAR_PATTERN = /^[2-9]\d{11}$/;
 const PAN_PATTERN = /^[A-Z]{5}\d{4}[A-Z]$/;
-const CODE_PATTERN = /^\d{6}$/;
 
 const compact = (value: string) => value.replace(/[\s-]/g, "").toUpperCase();
 const phoneDigits = (value: string) => PHONE_PATTERN.exec(value.replace(/[\s-]/g, ""))?.[1] ?? null;
+const normalEmail = (value: string) => (EMAIL_PATTERN.test(value.trim()) ? value.trim().toLowerCase() : null);
 
-type Values = Omit<DeliveryRegistrationInput, "phone_verification_token">;
+type Values = Omit<DeliveryRegistrationInput, "phone_verification_token" | "email_verification_token">;
 type Errors = Partial<Record<RegistrationField, string>>;
 
 const EMPTY: Values = {
@@ -164,66 +163,22 @@ export function DeliveryRegistrationForm() {
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [registered, setRegistered] = useState<DeliveryPartnerProfile | null>(null);
-  // Mobile OTP: send a code, enter it, and keep the verification token for registering.
-  const [otp, setOtp] = useState<{
-    status: "idle" | "sending" | "sent" | "verifying" | "verified";
-    code: string;
-    devCode: string | null;
-    resendAt: number;
-    token: string | null;
-    phone: string | null;
-  }>({ status: "idle", code: "", devCode: null, resendAt: 0, token: null, phone: null });
-  const [clock, setClock] = useState(() => Date.now());
-  const resendIn = Math.max(0, Math.ceil((otp.resendAt - clock) / 1000));
-  const phoneVerified = otp.status === "verified" && otp.phone === phoneDigits(values.phone);
+  // Both the mobile number and the email are verified by OTP in Step 1; registration sends both tokens.
+  const [verification, setVerification] = useState<Record<"phone" | "email", { value: string; token: string } | null>>({
+    phone: null,
+    email: null,
+  });
+  const phoneVerified = !!verification.phone && verification.phone.value === phoneDigits(values.phone);
+  const emailVerified = !!verification.email && verification.email.value === normalEmail(values.email);
 
-  // Ticks once a second while a resend countdown is showing.
-  useEffect(() => {
-    if (resendIn <= 0) return;
-    const timer = setTimeout(() => setClock(Date.now()), 1000);
-    return () => clearTimeout(timer);
-  }, [resendIn, clock]);
-
-  function resetOtp() {
-    setOtp({ status: "idle", code: "", devCode: null, resendAt: 0, token: null, phone: null });
+  function clearVerification(channel: "phone" | "email") {
+    setVerification((prev) => ({ ...prev, [channel]: null }));
   }
 
-  async function sendCode() {
-    const digits = phoneDigits(values.phone);
-    if (!digits) {
-      setErrors((prev) => ({ ...prev, phone: "Enter a 10-digit Indian mobile number." }));
-      return;
-    }
-    setErrors((prev) => ({ ...prev, phone: undefined, code: undefined }));
-    setOtp((prev) => ({ ...prev, status: "sending" }));
-    try {
-      const sent = await sendPhoneOtp(digits);
-      const now = Date.now();
-      setClock(now);
-      setOtp({ status: "sent", code: "", devCode: sent.dev_code ?? null, resendAt: now + sent.resend_in * 1000, token: null, phone: digits });
-    } catch (error) {
-      const e = error instanceof RegistrationError ? error : new RegistrationError("Couldn’t send the code. Try again.");
-      setErrors((prev) => ({ ...prev, phone: e.fieldErrors.phone ?? e.message }));
-      setOtp((prev) => ({ ...prev, status: prev.phone ? "sent" : "idle" }));
-    }
-  }
-
-  async function verifyCode() {
-    if (!otp.phone) return;
-    if (!CODE_PATTERN.test(otp.code.trim())) {
-      setErrors((prev) => ({ ...prev, code: "Enter the 6-digit code." }));
-      return;
-    }
-    setErrors((prev) => ({ ...prev, code: undefined }));
-    setOtp((prev) => ({ ...prev, status: "verifying" }));
-    try {
-      const token = await verifyPhoneOtp(otp.phone, otp.code.trim());
-      setOtp((prev) => ({ ...prev, status: "verified", token, devCode: null }));
-    } catch (error) {
-      const e = error instanceof RegistrationError ? error : new RegistrationError("Couldn’t check the code. Try again.");
-      setErrors((prev) => ({ ...prev, code: e.fieldErrors.code ?? e.message }));
-      setOtp((prev) => ({ ...prev, status: "sent" }));
-    }
+  function requireVerified(found: Errors): Errors {
+    if (!found.phone && !phoneVerified) found.phone = "Verify your mobile number with the OTP to continue.";
+    if (!found.email && !emailVerified) found.email = "Verify your email with the OTP to continue.";
+    return found;
   }
   const headingRef = useRef<HTMLHeadingElement>(null);
 
@@ -242,7 +197,7 @@ export function DeliveryRegistrationForm() {
 
   function next() {
     const stepErrors = validate(values, STEPS[step].fields);
-    if (step === 0 && !stepErrors.phone && !phoneVerified) stepErrors.phone = "Verify your mobile number to continue.";
+    if (step === 0) requireVerified(stepErrors);
     setErrors(stepErrors);
     if (Object.keys(stepErrors).length === 0) {
       setFormError(null);
@@ -255,8 +210,7 @@ export function DeliveryRegistrationForm() {
     if (step < STEPS.length - 1) return next();
     if (submitting) return;
     setFormError(null);
-    const allErrors = validate(values, STEPS.flatMap((s) => s.fields));
-    if (!allErrors.phone && (!phoneVerified || !otp.token)) allErrors.phone = "Verify your mobile number to continue.";
+    const allErrors = requireVerified(validate(values, STEPS.flatMap((s) => s.fields)));
     setErrors(allErrors);
     const firstBad = STEPS.findIndex((s) => s.fields.some((f) => allErrors[f]));
     if (firstBad !== -1) {
@@ -274,15 +228,17 @@ export function DeliveryRegistrationForm() {
           driving_license: compact(values.driving_license),
           ifsc: compact(values.ifsc),
           identity_number: compact(values.identity_number),
-          phone_verification_token: otp.token!,
+          phone_verification_token: verification.phone!.token,
+          email_verification_token: verification.email!.token,
         })
       );
     } catch (error) {
       const e = error instanceof RegistrationError ? error : new RegistrationError("Registration failed. Please try again.");
       setFormError(e.message);
       setErrors(e.fieldErrors);
-      // The verification was refused or expired: the number has to be verified again.
-      if (e.fieldErrors.phone) resetOtp();
+      // A verification was refused or expired: that number or address has to be verified again.
+      if (e.fieldErrors.phone) clearVerification("phone");
+      if (e.fieldErrors.email) clearVerification("email");
       // Go back to the first step with a field the server refused (for example, an email already in use).
       const bad = STEPS.findIndex((s) => s.fields.some((f) => e.fieldErrors[f]));
       if (bad !== -1) setStep(bad);
@@ -358,103 +314,66 @@ export function DeliveryRegistrationForm() {
                 <input {...p} autoComplete="name" placeholder="Arjun Kumar" maxLength={80} value={values.full_name} onChange={(e) => set("full_name", e.target.value)} />
               )}
             </Field>
-            <Field
-              id="phone"
-              label="Mobile number"
-              error={errors.phone}
-              hint={phoneVerified ? undefined : "We’ll text a 6-digit code to verify this number."}
-            >
+            <Field id="phone" label="Mobile number" error={errors.phone}>
               {(p) => (
-                <div className="flex gap-2">
-                  <div className="flex min-w-0 flex-1">
-                    <span className="inline-flex items-center rounded-l-md border border-r-0 border-app-muted/40 bg-app-bg px-3 text-sm text-app-muted">+91</span>
-                    <input
-                      {...p}
-                      className={cn(p.className, "rounded-l-none", phoneVerified && "border-primary bg-primary-light/40")}
-                      type="tel"
-                      inputMode="numeric"
-                      autoComplete="tel-national"
-                      placeholder="98400 12345"
-                      maxLength={14}
-                      value={values.phone}
-                      readOnly={phoneVerified}
-                      onChange={(e) => {
-                        set("phone", e.target.value);
-                        if (otp.status !== "idle") resetOtp();
-                      }}
-                    />
-                  </div>
-                  {phoneVerified ? (
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-primary-light px-3 text-sm font-medium text-primary-dark" role="status">
-                      <CheckCircleIcon className="h-4 w-4" /> Verified
-                    </span>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="shrink-0 px-3"
-                      loading={otp.status === "sending"}
-                      disabled={resendIn > 0 || otp.status === "verifying"}
-                      onClick={sendCode}
-                    >
-                      {otp.status === "idle" || otp.status === "sending" ? "Send code" : resendIn > 0 ? `Resend in ${resendIn}s` : "Resend"}
-                    </Button>
-                  )}
+                <div className="flex">
+                  <span className="inline-flex items-center rounded-l-md border border-r-0 border-app-muted/40 bg-app-bg px-3 text-sm text-app-muted">+91</span>
+                  <input
+                    {...p}
+                    className={cn(p.className, "rounded-l-none", phoneVerified && "border-primary bg-primary-light/40")}
+                    type="tel"
+                    inputMode="numeric"
+                    autoComplete="tel-national"
+                    placeholder="98400 12345"
+                    maxLength={14}
+                    value={values.phone}
+                    readOnly={phoneVerified}
+                    onChange={(e) => set("phone", e.target.value)}
+                  />
                 </div>
               )}
             </Field>
-            {phoneVerified && (
-              <button
-                type="button"
-                onClick={() => { resetOtp(); setErrors((prev) => ({ ...prev, phone: undefined })); }}
-                className="-mt-3 self-start rounded-sm text-xs font-medium text-primary hover:text-primary-dark hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                Change number
-              </button>
-            )}
-            {!phoneVerified && (otp.status === "sent" || otp.status === "verifying") && (
-              <div className="-mt-1 flex flex-col gap-2 rounded-md border border-app-border bg-app-bg p-3">
-                <Field id="code" label={`Enter the code sent to +91 ${otp.phone?.replace(/(\d{5})(\d{5})/, "$1 $2")}`} error={errors.code}>
-                  {(p) => (
-                    <div className="flex gap-2">
-                      <input
-                        {...p}
-                        className={cn(p.className, "min-w-0 flex-1 tracking-[0.4em]")}
-                        inputMode="numeric"
-                        autoComplete="one-time-code"
-                        placeholder="••••••"
-                        maxLength={6}
-                        value={otp.code}
-                        onChange={(e) => {
-                          setOtp((prev) => ({ ...prev, code: e.target.value.replace(/\D/g, "") }));
-                          if (errors.code) setErrors((prev) => ({ ...prev, code: undefined }));
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            void verifyCode();
-                          }
-                        }}
-                      />
-                      <Button type="button" className="shrink-0 px-4" loading={otp.status === "verifying"} onClick={verifyCode}>
-                        Verify
-                      </Button>
-                    </div>
-                  )}
-                </Field>
-                {otp.devCode && (
-                  <p className="text-xs text-app-muted">
-                    Test mode (no SMS provider connected yet): your code is{" "}
-                    <span className="font-semibold tracking-widest text-app-text">{otp.devCode}</span>
-                  </p>
-                )}
-              </div>
-            )}
+            <OtpVerifier
+              channel="phone"
+              destination={phoneDigits(values.phone)}
+              invalidMessage="Enter a 10-digit Indian mobile number."
+              verified={phoneVerified}
+              onVerified={(token, value) => {
+                setVerification((prev) => ({ ...prev, phone: { value, token } }));
+                setErrors((prev) => ({ ...prev, phone: undefined }));
+              }}
+              onReset={() => clearVerification("phone")}
+              onFieldError={(message) => setErrors((prev) => ({ ...prev, phone: message }))}
+              disabled={submitting}
+            />
             <Field id="email" label="Email address" error={errors.email}>
               {(p) => (
-                <input {...p} type="email" autoComplete="email" placeholder="arjun@example.com" maxLength={254} value={values.email} onChange={(e) => set("email", e.target.value)} />
+                <input
+                  {...p}
+                  className={cn(p.className, emailVerified && "border-primary bg-primary-light/40")}
+                  type="email"
+                  autoComplete="email"
+                  placeholder="arjun@example.com"
+                  maxLength={254}
+                  value={values.email}
+                  readOnly={emailVerified}
+                  onChange={(e) => set("email", e.target.value)}
+                />
               )}
             </Field>
+            <OtpVerifier
+              channel="email"
+              destination={normalEmail(values.email)}
+              invalidMessage="Enter a valid email address."
+              verified={emailVerified}
+              onVerified={(token, value) => {
+                setVerification((prev) => ({ ...prev, email: { value, token } }));
+                setErrors((prev) => ({ ...prev, email: undefined }));
+              }}
+              onReset={() => clearVerification("email")}
+              onFieldError={(message) => setErrors((prev) => ({ ...prev, email: message }))}
+              disabled={submitting}
+            />
             <Field id="password" label="Password" error={errors.password} hint="At least 10 characters with letters and numbers.">
               {(p) => (
                 <div className="relative">

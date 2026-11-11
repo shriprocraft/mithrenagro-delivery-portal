@@ -16,9 +16,12 @@ export interface DeliveryRegistrationInput {
   ifsc: string;
   identity_type: IdentityType;
   identity_number: string;
-  // From verifyPhoneOtp(); registration uses it up.
+  // From verifyOtp("phone" | "email"); registration uses them up.
   phone_verification_token: string;
+  email_verification_token: string;
 }
+
+export type OtpChannel = "phone" | "email";
 
 export interface DeliveryPartnerProfile {
   partner_id: string;
@@ -45,7 +48,9 @@ interface DeliveryAuthResponse {
   partner: DeliveryPartnerProfile;
 }
 
-export type RegistrationField = Exclude<keyof DeliveryRegistrationInput, "phone_verification_token"> | "code";
+export type RegistrationField =
+  | Exclude<keyof DeliveryRegistrationInput, "phone_verification_token" | "email_verification_token">
+  | "code";
 
 export class RegistrationError extends Error {
   constructor(
@@ -89,23 +94,28 @@ export interface SentOtp {
   dev_code?: string | null;
 }
 
-/** POST /delivery/auth/send-otp: texts a 6-digit code to the number. */
-export async function sendPhoneOtp(phone: string): Promise<SentOtp> {
+const OTP = {
+  phone: { send: DELIVERY_API.sendOtp, verify: DELIVERY_API.verifyOtp, token: "phone_verification_token" },
+  email: { send: DELIVERY_API.sendEmailOtp, verify: DELIVERY_API.verifyEmailOtp, token: "email_verification_token" },
+} as const;
+
+/** POST /delivery/auth/send-otp (SMS) or /send-email-otp: sends a 6-digit code. */
+export async function sendOtp(channel: OtpChannel, destination: string): Promise<SentOtp> {
   try {
-    return await apiFetch<SentOtp>(DELIVERY_API.sendOtp, { method: "POST", body: { phone } });
+    return await apiFetch<SentOtp>(OTP[channel].send, { method: "POST", body: { [channel]: destination } });
   } catch (error) {
     throw error instanceof ApiRequestError ? toRegistrationError(error) : unreachable();
   }
 }
 
-/** POST /delivery/auth/verify-otp: returns the token that registration needs. */
-export async function verifyPhoneOtp(phone: string, code: string): Promise<string> {
+/** POST /delivery/auth/verify-otp or /verify-email-otp: returns the token that registration needs. */
+export async function verifyOtp(channel: OtpChannel, destination: string, code: string): Promise<string> {
   try {
-    const r = await apiFetch<{ phone_verification_token: string }>(DELIVERY_API.verifyOtp, {
+    const r = await apiFetch<Record<string, string>>(OTP[channel].verify, {
       method: "POST",
-      body: { phone, code },
+      body: { [channel]: destination, code },
     });
-    return r.phone_verification_token;
+    return r[OTP[channel].token];
   } catch (error) {
     throw error instanceof ApiRequestError ? toRegistrationError(error) : unreachable();
   }

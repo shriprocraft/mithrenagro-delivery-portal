@@ -70,6 +70,8 @@ export const DELIVERY_API = {
   // Implemented on the backend (delivery-app-api):
   sendOtp: "/delivery/auth/send-otp", //            POST  {phone} -> {expires_in, resend_in, dev_code?}
   verifyOtp: "/delivery/auth/verify-otp", //        POST  {phone, code} -> {phone_verification_token}
+  sendEmailOtp: "/delivery/auth/send-email-otp", // POST  {email} -> {expires_in, resend_in, dev_code?}
+  verifyEmailOtp: "/delivery/auth/verify-email-otp", // POST {email, code} -> {email_verification_token}
   register: "/delivery/auth/register", //           POST  registration form -> tokens + profile   (/delivery/register)
   login: "/delivery/auth/login", //                 POST  {identifier, password} -> tokens   (mock-auth.findDemoPartnerId today)
   refresh: "/delivery/auth/refresh", //             POST  {refresh_token} -> new token pair
