@@ -24,14 +24,23 @@ const VEHICLE_NUMBER_PATTERN = /^(?:TN[0-9]{2}[A-Z]{1,2}[0-9]{4}|[0-9]{2}BH[0-9]
 const DRIVING_LICENSE_PATTERN = /^[A-Z]{2}[0-9A-Z]{8,14}$/;
 const ACCOUNT_PATTERN = /^\d{9,18}$/;
 const IFSC_PATTERN = /^[A-Z]{4}0[A-Z0-9]{6}$/;
-const AADHAAR_PATTERN = /^[2-9]\d{11}$/;
-const PAN_PATTERN = /^[A-Z]{5}\d{4}[A-Z]$/;
+// Exactly 12 digits; UIDAI never issues a number starting with 0 or 1 (the backend checks the same).
+const AADHAAR_PATTERN = /^\d{12}$/;
+const AADHAAR_FIRST_DIGIT = /^[2-9]/;
+const PAN_PATTERN = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
 
-const compact = (value: string) => value.replace(/[\s-]/g, "").toUpperCase();
+// Removes spaces (including non-breaking ones), dashes, dots and invisible characters that come along
+// when a number is pasted, then upper-cases: "2345 6789 0123" -> "234567890123", "abcde 1234 f" -> "ABCDE1234F".
+const compact = (value: string) => value.replace(/[\s\-.\u200B-\u200D\uFEFF]/g, "").toUpperCase();
 const phoneDigits = (value: string) => PHONE_PATTERN.exec(value.replace(/[\s-]/g, ""))?.[1] ?? null;
 const normalEmail = (value: string) => (EMAIL_PATTERN.test(value.trim()) ? value.trim().toLowerCase() : null);
 
-type Values = Omit<DeliveryRegistrationInput, "phone_verification_token" | "email_verification_token">;
+// The form keeps the Aadhaar and PAN numbers separately, so switching between them never loses what was
+// typed; identity_number is taken from the selected one when registering.
+type Values = Omit<DeliveryRegistrationInput, "phone_verification_token" | "email_verification_token" | "identity_number"> & {
+  aadhaar_number: string;
+  pan_number: string;
+};
 type Errors = Partial<Record<RegistrationField, string>>;
 
 const EMPTY: Values = {
@@ -45,7 +54,8 @@ const EMPTY: Values = {
   bank_account: "",
   ifsc: "",
   identity_type: "aadhaar",
-  identity_number: "",
+  aadhaar_number: "",
+  pan_number: "",
 };
 
 const STEPS: { title: string; hint: string; fields: RegistrationField[] }[] = [
@@ -79,10 +89,14 @@ function validate(values: Values, fields: RegistrationField[]): Errors {
     all.driving_license = "Enter the driving licence number, like TN33 20190001234.";
   if (!ACCOUNT_PATTERN.test(v.bank_account.replace(/[\s-]/g, ""))) all.bank_account = "Account number should be 9 to 18 digits.";
   if (!IFSC_PATTERN.test(compact(v.ifsc))) all.ifsc = "IFSC should look like HDFC0001234.";
-  const id = compact(v.identity_number);
-  if (v.identity_type === "aadhaar" && !AADHAAR_PATTERN.test(id)) all.identity_number = "Aadhaar number should be exactly 12 digits.";
-  if (v.identity_type === "pan" && !PAN_PATTERN.test(id))
+  if (v.identity_type === "aadhaar") {
+    const aadhaar = compact(v.aadhaar_number);
+    if (!AADHAAR_PATTERN.test(aadhaar))
+      all.identity_number = `Aadhaar number should be exactly 12 digits (you entered ${aadhaar.replace(/\D/g, "").length}${/\D/.test(aadhaar) ? " and other characters" : ""}).`;
+    else if (!AADHAAR_FIRST_DIGIT.test(aadhaar)) all.identity_number = "Aadhaar numbers never start with 0 or 1. Check the number.";
+  } else if (!PAN_PATTERN.test(compact(v.pan_number))) {
     all.identity_number = "PAN should be 5 letters, 4 digits and a letter, like ABCDE1234F.";
+  }
   return Object.fromEntries(Object.entries(all).filter(([key]) => fields.includes(key as RegistrationField)));
 }
 
@@ -192,7 +206,9 @@ export function DeliveryRegistrationForm() {
 
   function set<K extends keyof Values>(key: K, value: Values[K]) {
     setValues((prev) => ({ ...prev, [key]: value }));
-    if (errors[key]) setErrors((prev) => ({ ...prev, [key]: undefined }));
+    // The Aadhaar and PAN inputs report their errors under identity_number (handled by their own onChange).
+    const field = key as string as RegistrationField;
+    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
   }
 
   function next() {
@@ -219,15 +235,17 @@ export function DeliveryRegistrationForm() {
     }
     setSubmitting(true);
     try {
+      // The Aadhaar and PAN inputs are form-only: only the selected one is sent, as identity_number.
+      const { aadhaar_number, pan_number, ...fields } = values;
       setRegistered(
         await registerDeliveryPartner({
-          ...values,
+          ...fields,
           full_name: values.full_name.trim(),
           email: values.email.trim(),
           vehicle_number: compact(values.vehicle_number),
           driving_license: compact(values.driving_license),
           ifsc: compact(values.ifsc),
-          identity_number: compact(values.identity_number),
+          identity_number: compact(values.identity_type === "aadhaar" ? aadhaar_number : pan_number),
           phone_verification_token: verification.phone!.token,
           email_verification_token: verification.email!.token,
         })
@@ -450,7 +468,11 @@ export function DeliveryRegistrationForm() {
                       values.identity_type === t ? "bg-primary text-white shadow-card" : "text-app-muted hover:text-app-text"
                     )}
                   >
-                    <input type="radio" name="identity_type" value={t} checked={values.identity_type === t} onChange={() => { set("identity_type", t); set("identity_number", ""); }} className="sr-only" />
+                    <input type="radio" name="identity_type" value={t} checked={values.identity_type === t} onChange={() => {
+                        // Only the selected document changes; both numbers (and the bank details) are kept.
+                        set("identity_type", t);
+                        setErrors((prev) => ({ ...prev, identity_number: undefined }));
+                      }} className="sr-only" />
                     {t === "aadhaar" ? "Aadhaar" : "PAN"}
                   </label>
                 ))}
@@ -469,9 +491,13 @@ export function DeliveryRegistrationForm() {
                   inputMode={values.identity_type === "aadhaar" ? "numeric" : "text"}
                   autoComplete="off"
                   placeholder={values.identity_type === "aadhaar" ? "2345 6789 0123" : "ABCDE1234F"}
-                  maxLength={values.identity_type === "aadhaar" ? 14 : 10}
-                  value={values.identity_number}
-                  onChange={(e) => set("identity_number", e.target.value)}
+                  // Room for spaces or dashes in a pasted number; it is cleaned before checking.
+                  maxLength={values.identity_type === "aadhaar" ? 20 : 16}
+                  value={values.identity_type === "aadhaar" ? values.aadhaar_number : values.pan_number}
+                  onChange={(e) => {
+                    set(values.identity_type === "aadhaar" ? "aadhaar_number" : "pan_number", e.target.value);
+                    if (errors.identity_number) setErrors((prev) => ({ ...prev, identity_number: undefined }));
+                  }}
                 />
               )}
             </Field>
