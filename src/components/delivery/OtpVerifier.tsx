@@ -53,17 +53,20 @@ export function OtpVerifier({
   const [codeError, setCodeError] = useState<string | undefined>();
   const [devCode, setDevCode] = useState<string | null>(null);
   const [resendAt, setResendAt] = useState(0);
+  const [expiresAt, setExpiresAt] = useState(0);
   const [clock, setClock] = useState(() => Date.now());
   const resendIn = Math.max(0, Math.ceil((resendAt - clock) / 1000));
+  const expiresIn = Math.max(0, Math.ceil((expiresAt - clock) / 1000));
   const copy = COPY[channel];
   const inputId = `reg-${channel}-otp`;
 
-  // Ticks once a second while the resend countdown shows.
+  // Ticks once a second while a code is waiting (expiry countdown) or the resend wait runs.
   useEffect(() => {
-    if (resendIn <= 0) return;
+    const waiting = (status === "sent" || status === "verifying") && expiresIn > 0;
+    if (resendIn <= 0 && !waiting) return;
     const timer = setTimeout(() => setClock(Date.now()), 1000);
     return () => clearTimeout(timer);
-  }, [resendIn, clock]);
+  }, [resendIn, expiresIn, status, clock]);
 
   // A code belongs to the number or address it was sent to: editing it starts over.
   useEffect(() => {
@@ -89,6 +92,8 @@ export function OtpVerifier({
       const now = Date.now();
       setClock(now);
       setResendAt(now + sent.resend_in * 1000);
+      // The backend says how long the code lasts (expires_in, 300 seconds today).
+      setExpiresAt(now + sent.expires_in * 1000);
       // Only the mobile code is ever shown: the email code must come from the inbox.
       setDevCode(channel === "phone" ? (sent.dev_code ?? null) : null);
       setSentTo(destination);
@@ -191,13 +196,25 @@ export function OtpVerifier({
                 }
               }}
             />
-            <Button type="button" className="shrink-0 px-4" loading={status === "verifying"} disabled={disabled} onClick={check}>
+            <Button type="button" className="shrink-0 px-4" loading={status === "verifying"} disabled={disabled || expiresIn === 0} onClick={check}>
               Verify
             </Button>
           </div>
           {codeError && (
             <p id={`${inputId}-error`} className="text-xs text-danger">
               {codeError}
+            </p>
+          )}
+          {expiresIn > 0 ? (
+            <p className="text-xs text-app-muted" aria-live="off">
+              Your OTP expires in{" "}
+              <span className={cn("font-semibold tabular-nums", expiresIn <= 60 ? "text-warning" : "text-app-text")}>
+                {String(Math.floor(expiresIn / 60)).padStart(2, "0")}:{String(expiresIn % 60).padStart(2, "0")}
+              </span>
+            </p>
+          ) : (
+            <p className="text-xs font-medium text-danger" role="status">
+              Your OTP has expired. Request a new one with Resend OTP.
             </p>
           )}
           {channel === "phone" && devCode && (

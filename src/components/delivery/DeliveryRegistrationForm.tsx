@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type SVGProps } from "react";
 import { Button } from "@/components/ui/Button";
 import { CheckCircleIcon, EyeIcon, EyeOffIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
@@ -151,14 +151,20 @@ function Stepper({ step }: { step: number }) {
             <span
               className={cn(
                 "flex h-8 w-8 shrink-0 items-center justify-center rounded-pill text-sm font-semibold transition-colors",
-                done && "bg-primary text-white",
-                current && "bg-primary text-white ring-4 ring-primary-light",
+                done && "bg-primary text-white shadow-card",
+                current && "border-2 border-primary bg-surface text-primary ring-4 ring-primary-light",
                 !done && !current && "bg-app-border text-app-muted"
               )}
+              aria-label={done ? `${s.title}: saved` : undefined}
             >
-              {done ? <CheckCircleIcon className="h-4 w-4" /> : i + 1}
+              {done ? <CheckIcon className="h-4 w-4" /> : i + 1}
             </span>
-            <span className={cn("hidden text-xs font-medium sm:block", current ? "text-app-text" : "text-app-muted")}>
+            <span
+              className={cn(
+                "hidden text-xs font-medium sm:block",
+                done ? "text-primary" : current ? "text-app-text" : "text-app-muted"
+              )}
+            >
               {s.title}
             </span>
             {i < STEPS.length - 1 && <span className={cn("h-0.5 flex-1 rounded-pill", done ? "bg-primary" : "bg-app-border")} />}
@@ -169,8 +175,24 @@ function Stepper({ step }: { step: number }) {
   );
 }
 
+// A plain tick for the completed-step circles.
+function CheckIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
 export function DeliveryRegistrationForm() {
   const [step, setStep] = useState(0);
+  // "Saved" confirmation shown for a few seconds after moving to the next step.
+  const [savedNotice, setSavedNotice] = useState(0);
+  useEffect(() => {
+    if (!savedNotice) return;
+    const timer = setTimeout(() => setSavedNotice(0), 4000);
+    return () => clearTimeout(timer);
+  }, [savedNotice]);
   const [values, setValues] = useState<Values>(EMPTY);
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -218,6 +240,7 @@ export function DeliveryRegistrationForm() {
     if (Object.keys(stepErrors).length === 0) {
       setFormError(null);
       setStep((s) => s + 1);
+      setSavedNotice(Date.now());
     }
   }
 
@@ -317,6 +340,17 @@ export function DeliveryRegistrationForm() {
         </h2>
         <p className="text-sm text-app-muted">{current.hint}</p>
       </div>
+
+      {savedNotice > 0 && !formError && (
+        <p
+          key={savedNotice}
+          role="status"
+          className="mb-4 flex items-center gap-2 rounded-md border border-primary/30 bg-primary-light px-3 py-2 text-sm font-medium text-primary-dark"
+        >
+          <CheckCircleIcon className="h-5 w-5 shrink-0 text-primary" />
+          Your information is saved successfully!
+        </p>
+      )}
 
       {formError && (
         <p role="alert" className="mb-4 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">

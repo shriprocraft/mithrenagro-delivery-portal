@@ -63,23 +63,61 @@ export class RegistrationError extends Error {
 
 const TOKENS_KEY = "mithren.delivery.tokens";
 
+/** Emails are compared and stored trimmed and lower-case, for every domain (.in, .ac.in, .co.in, ...). */
+export const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+function saveTokens(response: DeliveryAuthResponse) {
+  try {
+    localStorage.setItem(TOKENS_KEY, JSON.stringify({ access: response.access_token, refresh: response.refresh_token }));
+  } catch {
+    /* private mode: the partner signs in again later */
+  }
+}
+
 /**
- * Registers the partner on the shared backend and keeps the returned tokens for the signed-in
- * session (sign-in still uses the demo accounts until it is connected to the backend too).
+ * Registers the partner on the shared backend and keeps the returned tokens.
  * Turns the backend's errors into one message per form field.
  */
 export async function registerDeliveryPartner(input: DeliveryRegistrationInput): Promise<DeliveryPartnerProfile> {
   try {
-    const response = await apiFetch<DeliveryAuthResponse>(DELIVERY_API.register, { method: "POST", body: input });
-    try {
-      localStorage.setItem(TOKENS_KEY, JSON.stringify({ access: response.access_token, refresh: response.refresh_token }));
-    } catch {
-      /* private mode: the partner signs in again later */
-    }
+    const response = await apiFetch<DeliveryAuthResponse>(DELIVERY_API.register, {
+      method: "POST",
+      body: { ...input, email: normalizeEmail(input.email) },
+    });
+    saveTokens(response);
     return response.partner;
   } catch (error) {
     throw error instanceof ApiRequestError ? toRegistrationError(error) : unreachable();
   }
+}
+
+/** POST /delivery/auth/login with an email (any case) or mobile number; keeps the tokens. */
+export async function loginDeliveryPartner(identifier: string, password: string): Promise<DeliveryPartnerProfile> {
+  const id = identifier.includes("@") ? normalizeEmail(identifier) : identifier.trim();
+  try {
+    const response = await apiFetch<DeliveryAuthResponse>(DELIVERY_API.login, {
+      method: "POST",
+      body: { identifier: id, password },
+    });
+    saveTokens(response);
+    return response.partner;
+  } catch (error) {
+    if (!(error instanceof ApiRequestError)) throw unreachable();
+    if (error.status === 401) throw new RegistrationError("Email or password is incorrect.");
+    throw new RegistrationError(error.message || "Sign-in failed. Please try again.");
+  }
+}
+
+/** Ends the server session (best effort) and forgets the tokens. */
+export async function logoutDeliveryPartner(): Promise<void> {
+  let refresh: string | undefined;
+  try {
+    refresh = JSON.parse(localStorage.getItem(TOKENS_KEY) ?? "null")?.refresh;
+    localStorage.removeItem(TOKENS_KEY);
+  } catch {
+    /* nothing stored */
+  }
+  if (refresh) await apiFetch(DELIVERY_API.logout, { method: "POST", body: { refresh_token: refresh } }).catch(() => undefined);
 }
 
 const FIELDS: RegistrationField[] = [

@@ -7,6 +7,7 @@ import { EyeIcon, EyeOffIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
 import { simulateLatency } from "@/lib/simulated-latency";
 import { findDemoPartnerId } from "@/services/mock-auth";
+import { loginDeliveryPartner, normalizeEmail, RegistrationError } from "@/services/delivery-registration";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -33,7 +34,7 @@ export function DeliveryLoginForm({ onSignIn }: { onSignIn: (partnerId: string) 
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const { showToast } = useDeliverySession();
+  const { showToast, signInPartner } = useDeliverySession();
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -48,15 +49,23 @@ export function DeliveryLoginForm({ onSignIn }: { onSignIn: (partnerId: string) 
     }
 
     setSubmitting(true);
-    await simulateLatency();
-    // Prototype check against demo fixtures only — see src/services/mock-auth.ts.
-    const partnerId = findDemoPartnerId(email, password);
-    if (!partnerId || !onSignIn(partnerId)) {
+    const normalized = normalizeEmail(email);
+    // The built-in demo accounts sign in locally (src/services/mock-auth.ts) ...
+    const demoPartnerId = findDemoPartnerId(normalized, password);
+    if (demoPartnerId) {
+      await simulateLatency();
+      if (onSignIn(demoPartnerId)) return; // the entry page redirects
+    }
+    // ... and registered partners sign in on the backend, with any email case or domain.
+    try {
+      signInPartner(await loginDeliveryPartner(normalized, password));
+      // On success the entry page redirects, so the button stays in its loading state.
+    } catch (error) {
+      const message = error instanceof RegistrationError ? error.message : "Sign-in failed. Please try again.";
       setSubmitting(false);
-      setFormError("Email or password is incorrect.");
+      setFormError(message);
       showToast("Sign-in failed. Check your email and password.", "error");
     }
-    // On success the entry page redirects, so the button stays in its loading state.
   }
 
   return (

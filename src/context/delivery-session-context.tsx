@@ -12,6 +12,7 @@ import type { DeliveryJob, DeliveryPartnerProfile, DeliveryStatus } from "@/type
 import type { ToastMessage, ToastTone } from "@/components/feedback/Toast";
 import { demoDeliveryPartners } from "@/data/delivery-partner";
 import { demoDeliveryJobs } from "@/data/delivery-jobs";
+import { logoutDeliveryPartner, type DeliveryPartnerProfile as BackendPartnerProfile } from "@/services/delivery-registration";
 import {
   getAssignedJobs,
   getDeliveryHistory,
@@ -35,6 +36,8 @@ interface DeliverySessionValue {
   returnJob: (jobId: string) => MockActionResult;
   toggleAvailability: () => void;
   signIn: (partnerId: string) => boolean;
+  // Starts a session for a partner who signed in on the backend (registered accounts).
+  signInPartner: (profile: BackendPartnerProfile) => void;
   signOut: () => void;
   // App-wide toast, rendered by the app shell and the sign-in screen. Living here (not in
   // individual components) keeps a toast visible even when the component that raised it
@@ -125,8 +128,25 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(() => {
     setPartnerId(null);
-    showToast("Signed out of the demo session.");
+    void logoutDeliveryPartner();
+    showToast("Signed out.");
   }, [showToast]);
+
+  const signInPartner = useCallback(
+    (profile: BackendPartnerProfile) => {
+      const partner: DeliveryPartnerProfile = {
+        id: profile.partner_id,
+        name: profile.full_name,
+        phone: profile.phone,
+        vehicle_type: { bike: "Bike", scooter: "Scooter", ev: "EV" }[profile.vehicle_type],
+        availability_status: profile.availability_status,
+      };
+      setPartners((prev) => [...prev.filter((p) => p.id !== partner.id), partner]);
+      setPartnerId(partner.id);
+      showToast(`Welcome, ${profile.full_name.split(" ")[0]}! You're signed in.`);
+    },
+    [showToast]
+  );
 
   // Starts a mock session for an explicit demo partner. Credential checks live in
   // src/services/mock-auth.ts; this only accepts IDs that exist in the demo fixtures.
@@ -154,6 +174,7 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
     returnJob,
     toggleAvailability,
     signIn,
+    signInPartner,
     signOut,
     toast,
     showToast,
