@@ -33,8 +33,9 @@ interface OtpVerifierProps {
 
 /**
  * Sends a 6-digit code to a mobile number or email, takes the code, and reports the verification
- * token. When the backend runs without a provider (DELIVERY_OTP_SENDER=dev), the code is shown as
- * "Test Mode" under the code box.
+ * token. Email codes arrive by email (Gmail SMTP) and are never shown on the page. Mobile codes have
+ * no SMS provider yet, so when the backend runs with DELIVERY_OTP_SENDER=dev the mobile code is shown
+ * as "Test Mode" under the code box.
  */
 export function OtpVerifier({
   channel,
@@ -88,7 +89,8 @@ export function OtpVerifier({
       const now = Date.now();
       setClock(now);
       setResendAt(now + sent.resend_in * 1000);
-      setDevCode(sent.dev_code ?? null);
+      // Only the mobile code is ever shown: the email code must come from the inbox.
+      setDevCode(channel === "phone" ? (sent.dev_code ?? null) : null);
       setSentTo(destination);
       setCode("");
       setStatus("sent");
@@ -198,7 +200,7 @@ export function OtpVerifier({
               {codeError}
             </p>
           )}
-          {devCode && (
+          {channel === "phone" && devCode && (
             <p id={`${inputId}-test`} className="text-xs font-medium text-warning">
               Test Mode: Your OTP is <span className="font-semibold tracking-widest">{devCode}</span>
             </p>
