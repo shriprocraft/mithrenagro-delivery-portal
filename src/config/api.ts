@@ -73,17 +73,13 @@ export const DELIVERY_API = {
   sendEmailOtp: "/delivery/auth/send-email-otp", // POST  {email} -> {expires_in, resend_in, dev_code?}
   verifyEmailOtp: "/delivery/auth/verify-email-otp", // POST {email, code} -> {email_verification_token}
   register: "/delivery/auth/register", //           POST  registration form -> tokens + profile   (/delivery/register)
-  login: "/delivery/auth/login", //                 POST  {identifier, password} -> tokens   (mock-auth.findDemoPartnerId today)
+  login: "/delivery/auth/login", //                 POST  {identifier, password} -> tokens + profile
   refresh: "/delivery/auth/refresh", //             POST  {refresh_token} -> new token pair
-  logout: "/delivery/auth/logout", //               POST  {refresh_token}                 (session signOut)
-  me: "/delivery/auth/me", //                       GET   partner profile               (profile page, header)
-  // Not implemented yet:
-  availability: "/delivery/partner/availability", // PATCH {availability_status}          (PartnerAvailabilityControl)
-  assignedJobs: "/delivery/jobs?scope=active", //   GET   active jobs incl. failed        (getAssignedJobs, /delivery/jobs)
-  history: "/delivery/jobs?scope=history", //       GET   delivered/returned jobs         (getDeliveryHistory, /delivery/history)
-  job: (id: string) => `/delivery/jobs/${encodeURIComponent(id)}`, //                   GET   (getDeliveryJobById, /delivery/jobs/[id])
-  status: (id: string) => `/delivery/jobs/${encodeURIComponent(id)}/status`, //         PATCH {status}           (updateMockDeliveryStatus)
-  fail: (id: string) => `/delivery/jobs/${encodeURIComponent(id)}/failure`, //          POST  {reason}           (recordMockFailure)
-  reattempt: (id: string) => `/delivery/jobs/${encodeURIComponent(id)}/reattempt`, //   POST                     (recordMockReattempt)
-  markReturned: (id: string) => `/delivery/jobs/${encodeURIComponent(id)}/return`, //   POST                     (recordMockReturn)
+  logout: "/delivery/auth/logout", //               POST  {refresh_token}                 (sign out)
+  me: "/delivery/auth/me", //                       GET   partner profile (restores the session on reload)
+  orders: "/delivery/orders", //                    GET   ?status=&limit=&offset= -> the partner's orders (/delivery/jobs, /history)
+  order: (id: string) => `/delivery/orders/${encodeURIComponent(id)}`, //              GET   one order in full; 403 if not assigned
+  orderStatus: (id: string) => `/delivery/orders/${encodeURIComponent(id)}/status`, // PATCH {status, expected_status}
+  availability: "/delivery/profile/availability", // PATCH {availability_status}          (profile page)
+  // Not implemented on the backend yet (demo partners only): failed deliveries, reattempts and returns.
 } as const;

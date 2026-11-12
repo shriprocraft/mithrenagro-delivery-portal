@@ -12,14 +12,15 @@ import { Toast } from "@/components/feedback/Toast";
 import logo from "../../../LOGO.png";
 
 export default function DeliveryEntryPage() {
-  const { isSignedIn, signIn, toast, clearToast } = useDeliverySession();
+  const { restoring, isSignedIn, signIn, toast, clearToast } = useDeliverySession();
   const router = useRouter();
 
   useEffect(() => {
     if (isSignedIn) router.replace("/delivery/jobs");
   }, [isSignedIn, router]);
 
-  if (isSignedIn) return null;
+  // While a stored session is restored (or once signed in), the page redirects to the jobs list.
+  if (restoring || isSignedIn) return null;
 
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-b from-primary-light to-app-bg">

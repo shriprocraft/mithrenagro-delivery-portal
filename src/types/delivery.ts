@@ -10,7 +10,9 @@ export type DeliveryStatus =
   | "out_for_delivery"
   | "delivered"
   | "failed"
-  | "returned";
+  | "returned"
+  // Backend orders only: the delivery was cancelled (by operations).
+  | "cancelled";
 
 export interface DeliveryStatusEvent {
   status: DeliveryStatus;
@@ -51,4 +53,9 @@ export interface DeliveryJob {
   // reattempt or return. The full reason history lives in status_history entries.
   failed_reason?: string;
   reattempt_count: number;
+  // Set for orders that come from the backend (registered partners): the statuses the partner can move
+  // the order to next, as the backend reports them. Demo jobs leave these unset.
+  source?: "backend";
+  next_statuses?: DeliveryStatus[];
+  payment_method?: "online" | "cod";
 }

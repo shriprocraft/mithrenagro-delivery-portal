@@ -19,6 +19,7 @@ const STATUS_TONE: Record<DeliveryStatus, "neutral" | "success" | "warning" | "d
   delivered: "success",
   failed: "danger",
   returned: "neutral",
+  cancelled: "danger",
 };
 
 const STATUS_ICON: Record<DeliveryStatus, typeof ClockIcon> = {
@@ -30,6 +31,7 @@ const STATUS_ICON: Record<DeliveryStatus, typeof ClockIcon> = {
   delivered: CheckCircleIcon,
   failed: XCircleIcon,
   returned: UndoIcon,
+  cancelled: XCircleIcon,
 };
 
 export function DeliveryStatusBadge({ status }: { status: DeliveryStatus }) {

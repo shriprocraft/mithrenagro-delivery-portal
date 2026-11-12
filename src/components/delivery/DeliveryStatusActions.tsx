@@ -33,11 +33,17 @@ export function DeliveryStatusActions({ job }: { job: DeliveryJob }) {
   // Only one action runs at a time; every action button is disabled while it does.
   const [pending, setPending] = useState<PendingAction | null>(null);
 
-  async function runAction(action: PendingAction, perform: () => MockActionResult, successMessage: string) {
+  const backend = job.source === "backend";
+
+  async function runAction(
+    action: PendingAction,
+    perform: () => MockActionResult | Promise<MockActionResult>,
+    successMessage: string
+  ) {
     if (pending) return;
     setPending(action);
-    await simulateLatency();
-    const result = perform();
+    if (!backend) await simulateLatency();
+    const result = await perform();
     setPending(null);
     if (result.error) {
       showToast(result.error, "error");
@@ -47,8 +53,41 @@ export function DeliveryStatusActions({ job }: { job: DeliveryJob }) {
     return true;
   }
 
-  if (job.status === "delivered" || job.status === "returned") {
-    return <p className="text-sm text-app-muted">This delivery is complete. No further actions are available.</p>;
+  if (job.status === "delivered" || job.status === "returned" || job.status === "cancelled") {
+    return (
+      <p className="text-sm text-app-muted">
+        {job.status === "cancelled" ? "This delivery was cancelled." : "This delivery is complete."} No further actions
+        are available.
+      </p>
+    );
+  }
+
+  // Registered partners' orders: the backend says what comes next (assigned -> out for delivery -> delivered).
+  if (backend) {
+    const next = job.next_statuses ?? [];
+    if (next.includes("out_for_delivery")) {
+      return (
+        <Button
+          className="self-start"
+          loading={pending === "forward"}
+          onClick={() => runAction("forward", () => updateStatus(job.id, "out_for_delivery"), "You're out for delivery.")}
+        >
+          Start delivery
+        </Button>
+      );
+    }
+    if (next.includes("delivered")) {
+      return (
+        <Button
+          className="self-start"
+          loading={pending === "delivered"}
+          onClick={() => runAction("delivered", () => updateStatus(job.id, "delivered"), "Delivery marked delivered.")}
+        >
+          Mark delivered
+        </Button>
+      );
+    }
+    return null;
   }
 
   if (job.status === "failed") {

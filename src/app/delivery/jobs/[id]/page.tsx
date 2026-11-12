@@ -10,9 +10,10 @@ import { useSimulatedLoading } from "@/lib/simulated-latency";
 
 export default function DeliveryJobDetailPage() {
   const params = useParams<{ id: string }>();
-  const { getJob } = useDeliverySession();
+  const { getJob, isBackendPartner, jobsLoading } = useDeliverySession();
   const job = getJob(params.id);
-  const loading = useSimulatedLoading();
+  const simulatedLoading = useSimulatedLoading();
+  const loading = isBackendPartner ? jobsLoading : simulatedLoading;
 
   return (
     <DeliveryAppShell>

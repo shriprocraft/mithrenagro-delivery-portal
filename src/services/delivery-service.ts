@@ -1,7 +1,7 @@
 import type { DeliveryJob, DeliveryPartnerProfile, DeliveryStatus } from "@/types/delivery";
 import { isValidTransition } from "@/lib/status-transitions";
 
-const TERMINAL_STATUSES: DeliveryStatus[] = ["delivered", "returned"];
+export const TERMINAL_STATUSES: DeliveryStatus[] = ["delivered", "returned", "cancelled"];
 
 export interface MockActionResult {
   jobs: DeliveryJob[];

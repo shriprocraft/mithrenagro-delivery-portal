@@ -27,6 +27,7 @@ const STATUS_LABELS: Record<DeliveryStatus, string> = {
   delivered: "Delivered",
   failed: "Failed",
   returned: "Returned",
+  cancelled: "Cancelled",
 };
 
 export function formatStatusLabel(status: DeliveryStatus): string {

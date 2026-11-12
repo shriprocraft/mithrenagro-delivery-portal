@@ -10,17 +10,18 @@ import { Toast } from "@/components/feedback/Toast";
 import { useDeliverySession } from "@/context/delivery-session-context";
 
 export function DeliveryAppShell({ children }: { children: ReactNode }) {
-  const { isSignedIn, toast, clearToast } = useDeliverySession();
+  const { restoring, isSignedIn, toast, clearToast } = useDeliverySession();
   const router = useRouter();
 
   // Every signed-in delivery page renders inside this shell, so this one check keeps
   // signed-out visitors (including after sign-out) on the /delivery sign-in screen.
   // Demo-only client guard; production authorization must be enforced server-side.
+  // Waits until a stored session has been restored, so a page reload keeps the partner signed in.
   useEffect(() => {
-    if (!isSignedIn) router.replace("/delivery");
-  }, [isSignedIn, router]);
+    if (!restoring && !isSignedIn) router.replace("/delivery");
+  }, [restoring, isSignedIn, router]);
 
-  if (!isSignedIn) return null;
+  if (restoring || !isSignedIn) return null;
 
   return (
     <div className="flex min-h-screen flex-col bg-app-bg">

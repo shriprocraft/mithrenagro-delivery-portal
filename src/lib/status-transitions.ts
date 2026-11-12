@@ -23,6 +23,7 @@ export const ALLOWED_TRANSITIONS: Record<DeliveryStatus, DeliveryStatus[]> = {
   delivered: [],
   failed: ["out_for_delivery", "returned"],
   returned: [],
+  cancelled: [],
 };
 
 export function isValidTransition(current: DeliveryStatus, next: DeliveryStatus): boolean {

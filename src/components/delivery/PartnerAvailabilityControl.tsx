@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import { simulateLatency } from "@/lib/simulated-latency";
 
 export function PartnerAvailabilityControl() {
-  const { partner, toggleAvailability, showToast } = useDeliverySession();
+  const { partner, toggleAvailability, showToast, isBackendPartner } = useDeliverySession();
   const [pending, setPending] = useState(false);
   if (!partner) return null;
 
@@ -15,10 +15,16 @@ export function PartnerAvailabilityControl() {
   async function handleToggle() {
     if (pending) return;
     setPending(true);
-    await simulateLatency();
-    toggleAvailability();
+    if (!isBackendPartner) await simulateLatency();
+    const error = await toggleAvailability();
     setPending(false);
-    showToast(`You are now ${available ? "unavailable" : "available"} for new deliveries (simulated).`);
+    if (error) {
+      showToast(error, "error");
+      return;
+    }
+    showToast(
+      `You are now ${available ? "unavailable" : "available"} for new deliveries${isBackendPartner ? "." : " (simulated)."}`
+    );
   }
 
   return (
@@ -30,7 +36,9 @@ export function PartnerAvailabilityControl() {
         <h2 id="availability-heading" className="text-sm font-semibold text-app-text">
           Availability
         </h2>
-        <p className="text-xs text-app-muted">Local demo value — not synced to a server.</p>
+        <p className="text-xs text-app-muted">
+          {isBackendPartner ? "Saved to your account." : "Local demo value — not synced to a server."}
+        </p>
       </div>
 
       <div

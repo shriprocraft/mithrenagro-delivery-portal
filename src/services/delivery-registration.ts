@@ -1,4 +1,5 @@
 import { ApiRequestError, apiFetch, DELIVERY_API } from "@/config/api";
+import { clearStoredSession, readTokens, saveTokens } from "@/services/delivery-api";
 
 export type VehicleType = "bike" | "scooter" | "ev";
 export type IdentityType = "aadhaar" | "pan";
@@ -61,18 +62,8 @@ export class RegistrationError extends Error {
   }
 }
 
-const TOKENS_KEY = "mithren.delivery.tokens";
-
 /** Emails are compared and stored trimmed and lower-case, for every domain (.in, .ac.in, .co.in, ...). */
 export const normalizeEmail = (email: string) => email.trim().toLowerCase();
-
-function saveTokens(response: DeliveryAuthResponse) {
-  try {
-    localStorage.setItem(TOKENS_KEY, JSON.stringify({ access: response.access_token, refresh: response.refresh_token }));
-  } catch {
-    /* private mode: the partner signs in again later */
-  }
-}
 
 /**
  * Registers the partner on the shared backend and keeps the returned tokens.
@@ -108,15 +99,10 @@ export async function loginDeliveryPartner(identifier: string, password: string)
   }
 }
 
-/** Ends the server session (best effort) and forgets the tokens. */
+/** Ends the server session (best effort) and forgets the stored session. */
 export async function logoutDeliveryPartner(): Promise<void> {
-  let refresh: string | undefined;
-  try {
-    refresh = JSON.parse(localStorage.getItem(TOKENS_KEY) ?? "null")?.refresh;
-    localStorage.removeItem(TOKENS_KEY);
-  } catch {
-    /* nothing stored */
-  }
+  const refresh = readTokens()?.refresh;
+  clearStoredSession();
   if (refresh) await apiFetch(DELIVERY_API.logout, { method: "POST", body: { refresh_token: refresh } }).catch(() => undefined);
 }
 
