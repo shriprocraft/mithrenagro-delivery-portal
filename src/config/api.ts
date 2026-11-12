@@ -72,7 +72,7 @@ export const DELIVERY_API = {
   verifyOtp: "/delivery/auth/verify-otp", //        POST  {phone, code} -> {phone_verification_token}
   sendEmailOtp: "/delivery/auth/send-email-otp", // POST  {email} -> {expires_in, resend_in, dev_code?}
   verifyEmailOtp: "/delivery/auth/verify-email-otp", // POST {email, code} -> {email_verification_token}
-  register: "/delivery/auth/register", //           POST  registration form -> tokens + profile   (/delivery/register)
+  register: "/delivery/auth/register", //           POST  partner registration (no public page: partners are admin-provisioned)
   login: "/delivery/auth/login", //                 POST  {identifier, password} -> tokens + profile
   refresh: "/delivery/auth/refresh", //             POST  {refresh_token} -> new token pair
   logout: "/delivery/auth/logout", //               POST  {refresh_token}                 (sign out)
