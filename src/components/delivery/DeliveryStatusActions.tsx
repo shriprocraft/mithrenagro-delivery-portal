@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { DeliveryJob, DeliveryStatus } from "@/types/delivery";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -25,10 +26,15 @@ const FORWARD_NEXT: Partial<Record<DeliveryStatus, DeliveryStatus>> = {
   picked_up: "out_for_delivery",
 };
 
-type PendingAction = "forward" | "delivered" | "failed";
+type PendingAction = "forward" | "delivered" | "failed" | "release";
+
+const rupees = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
 export function DeliveryStatusActions({ job }: { job: DeliveryJob }) {
-  const { updateStatus, failJob, showToast } = useDeliverySession();
+  const { updateStatus, failJob, releaseJob, showToast } = useDeliverySession();
+  const router = useRouter();
+  const [releaseOpen, setReleaseOpen] = useState(false);
+  const [releaseReason, setReleaseReason] = useState("");
   const [failureOpen, setFailureOpen] = useState(false);
   // Only one action runs at a time; every action button is disabled while it does.
   const [pending, setPending] = useState<PendingAction | null>(null);
@@ -56,35 +62,99 @@ export function DeliveryStatusActions({ job }: { job: DeliveryJob }) {
   if (job.status === "delivered" || job.status === "returned" || job.status === "cancelled") {
     return (
       <p className="text-sm text-app-muted">
-        {job.status === "cancelled" ? "This delivery was cancelled." : "This delivery is complete."} No further actions
-        are available.
+        {job.status === "cancelled"
+          ? `This order was cancelled${job.cancel_reason ? `: ${job.cancel_reason}` : ""}. Don't collect or deliver it.`
+          : "This delivery is complete."}{" "}
+        No further actions are available.
       </p>
     );
   }
 
-  // Registered partners' orders: the backend says what comes next (assigned -> out for delivery -> delivered).
+  // Registered partners' orders: the backend says what comes next
+  // (assigned -> picked up, once the seller has packed it -> out for delivery -> delivered).
   if (backend) {
     const next = job.next_statuses ?? [];
+    const cash = job.amount_to_collect ?? 0;
+    if (next.includes("picked_up")) {
+      return (
+        <div className="flex flex-col gap-2">
+          {!job.packed && (
+            <p className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
+              Not packed yet. The seller is still packing this order; you can pick it up once it&apos;s marked packed.
+            </p>
+          )}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              loading={pending === "forward"}
+              disabled={pending !== null}
+              onClick={() => runAction("forward", () => updateStatus(job.id, "picked_up"), "Picked up. Head to the customer when you're ready.")}
+            >
+              Mark picked up
+            </Button>
+            <Button variant="ghost" disabled={pending !== null} onClick={() => setReleaseOpen(true)}>
+              Can&apos;t pick it up
+            </Button>
+          </div>
+          <Dialog open={releaseOpen} onClose={() => pending !== "release" && setReleaseOpen(false)} title="Give this pickup back?">
+            <form
+              className="flex flex-col gap-3"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (releaseReason.trim().length < 3 || pending) return;
+                setPending("release");
+                const error = await releaseJob(job.id, releaseReason.trim());
+                setPending(null);
+                if (error) return showToast(error, "error");
+                setReleaseOpen(false);
+                showToast("Pickup released. Another partner in your zone can take it.");
+                router.push("/delivery/pickups");
+              }}
+            >
+              <p className="text-sm text-app-muted">It goes back to the partners in this zone. Tell the team why.</p>
+              <textarea
+                className="min-h-20 rounded-md border border-app-border bg-surface p-2 text-sm"
+                value={releaseReason}
+                onChange={(e) => setReleaseReason(e.target.value)}
+                placeholder="For example: bike puncture, can't reach the shop"
+                maxLength={300}
+                required
+              />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="ghost" onClick={() => setReleaseOpen(false)} disabled={pending === "release"}>
+                  Keep it
+                </Button>
+                <Button type="submit" variant="danger" loading={pending === "release"} disabled={releaseReason.trim().length < 3}>
+                  Release pickup
+                </Button>
+              </div>
+            </form>
+          </Dialog>
+        </div>
+      );
+    }
     if (next.includes("out_for_delivery")) {
       return (
         <Button
           className="self-start"
           loading={pending === "forward"}
-          onClick={() => runAction("forward", () => updateStatus(job.id, "out_for_delivery"), "You're out for delivery.")}
+          onClick={() => runAction("forward", () => updateStatus(job.id, "out_for_delivery"), "You're on the way to the customer.")}
         >
-          Start delivery
+          Start delivery (in transit)
         </Button>
       );
     }
     if (next.includes("delivered")) {
       return (
-        <Button
-          className="self-start"
-          loading={pending === "delivered"}
-          onClick={() => runAction("delivered", () => updateStatus(job.id, "delivered"), "Delivery marked delivered.")}
-        >
-          Mark delivered
-        </Button>
+        <div className="flex flex-col gap-2">
+          {cash > 0 && <p className="text-sm font-medium text-app-text">Collect {rupees(cash)} in cash before marking it delivered.</p>}
+          <Button
+            className="self-start"
+            loading={pending === "delivered"}
+            onClick={() => runAction("delivered", () => updateStatus(job.id, "delivered"), "Delivery marked delivered.")}
+          >
+            Mark delivered
+          </Button>
+        </div>
       );
     }
     return null;

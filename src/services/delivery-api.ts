@@ -1,5 +1,5 @@
 import { ApiRequestError, apiFetch, DELIVERY_API } from "@/config/api";
-import type { DeliveryJob, DeliveryStatus } from "@/types/delivery";
+import type { DeliveryJob, DeliveryStatus, PickupBoard } from "@/types/delivery";
 import type { DeliveryPartnerProfile as BackendPartnerProfile } from "@/services/delivery-registration";
 
 /**
@@ -107,11 +107,14 @@ async function authFetch<T>(path: string, options: { method?: string; body?: unk
 interface BackendJob {
   order_id: string;
   order_number: string;
-  delivery_status: "assigned" | "out_for_delivery" | "delivered" | "cancelled";
+  delivery_status: "assigned" | "picked_up" | "out_for_delivery" | "delivered" | "cancelled";
   next_statuses: DeliveryStatus[];
   assigned_at: string;
   delivered_at: string | null;
   payment_method: "online" | "cod";
+  packed?: boolean;
+  amount_to_collect_paise?: number;
+  cancel_reason?: string | null;
   pickup: {
     shop_name: string;
     phone: string;
@@ -162,7 +165,29 @@ export function toDeliveryJob(job: BackendJob, partnerId: string): DeliveryJob {
     source: "backend",
     next_statuses: job.next_statuses,
     payment_method: job.payment_method,
+    packed: job.packed ?? false,
+    amount_to_collect: (job.amount_to_collect_paise ?? 0) / 100,
+    ...(job.cancel_reason ? { cancel_reason: job.cancel_reason } : {}),
   };
+}
+
+interface BackendPickupPage {
+  items: {
+    order_id: string;
+    order_number: string;
+    packed: boolean;
+    approved_at: string | null;
+    item_count: number;
+    total_paise: number;
+    amount_to_collect_paise: number;
+    payment_method: "online" | "cod";
+    pickup: BackendJob["pickup"];
+    dropoff_city: string;
+    dropoff_pincode: string;
+  }[];
+  pincodes: string[];
+  active_jobs: number;
+  max_active_jobs: number;
 }
 
 export const deliveryApi = {
@@ -186,6 +211,43 @@ export const deliveryApi = {
     });
     return toDeliveryJob(updated, partnerId);
   },
+
+  /** Approved orders in the partner's zones that nobody has accepted yet (the Available Pickups screen). */
+  async pickups(): Promise<PickupBoard> {
+    const page = await authFetch<BackendPickupPage>(DELIVERY_API.pickups);
+    return {
+      offers: page.items.map((o) => ({
+        orderId: o.order_id,
+        orderNumber: o.order_number,
+        packed: o.packed,
+        approvedAt: o.approved_at,
+        itemCount: o.item_count,
+        total: o.total_paise / 100,
+        amountToCollect: o.amount_to_collect_paise / 100,
+        paymentMethod: o.payment_method,
+        shopName: o.pickup.shop_name,
+        pickupAddress: joinAddress(o.pickup.address_line1, o.pickup.city) || o.pickup.shop_name,
+        pickupPincode: o.pickup.pincode,
+        dropoffArea: joinAddress(o.dropoff_city, o.dropoff_pincode),
+      })),
+      pincodes: page.pincodes,
+      activeJobs: page.active_jobs,
+      maxActiveJobs: page.max_active_jobs,
+    };
+  },
+
+  /** First to accept gets the order; throws ApiRequestError 409 when another partner was first. */
+  async acceptPickup(partnerId: string, orderId: string): Promise<DeliveryJob> {
+    return toDeliveryJob(await authFetch<BackendJob>(DELIVERY_API.acceptPickup(orderId), { method: "POST" }), partnerId);
+  },
+
+  /** Gives an accepted pickup back before collecting it; it is offered to the zone again. */
+  releasePickup: (orderId: string, reason: string) =>
+    authFetch<null>(DELIVERY_API.releasePickup(orderId), { method: "POST", body: { reason } }),
+
+  /** The partner's position while carrying an order (for live tracking later). */
+  sendLocation: (latitude: number, longitude: number) =>
+    authFetch<unknown>(DELIVERY_API.location, { method: "PATCH", body: { latitude, longitude } }),
 
   setAvailability: (availability_status: "available" | "unavailable") =>
     authFetch<BackendPartnerProfile>(DELIVERY_API.availability, { method: "PATCH", body: { availability_status } }),

@@ -15,6 +15,7 @@ import { demoDeliveryPartners } from "@/data/delivery-partner";
 import { demoDeliveryJobs } from "@/data/delivery-jobs";
 import { logoutDeliveryPartner, type DeliveryPartnerProfile as BackendPartnerProfile } from "@/services/delivery-registration";
 import { deliveryApi, readSession, saveSession, SessionExpiredError } from "@/services/delivery-api";
+import { ApiRequestError } from "@/config/api";
 import {
   getAssignedJobs,
   getDeliveryHistory,
@@ -42,6 +43,10 @@ interface DeliverySessionValue {
   reloadJobs: () => void;
   getJob: (jobId: string) => DeliveryJob | undefined;
   updateStatus: (jobId: string, nextStatus: DeliveryStatus) => MockActionResult | Promise<MockActionResult>;
+  // Registered partners: take a pickup (first to accept gets it) or give one back before collecting it.
+  // Each resolves to an error message, or null when it worked.
+  acceptPickup: (orderId: string) => Promise<{ error: string | null; taken?: boolean; job?: DeliveryJob }>;
+  releaseJob: (jobId: string, reason: string) => Promise<string | null>;
   failJob: (jobId: string, reason: string) => MockActionResult;
   reattemptJob: (jobId: string) => MockActionResult;
   returnJob: (jobId: string) => MockActionResult;
@@ -163,6 +168,40 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
 
   const reloadJobs = useCallback(() => setJobsVersion((v) => v + 1), []);
 
+  // Registered partners: refresh their deliveries every 15 seconds while the page is visible, so a seller
+  // packing an order, or cancelling it, shows up without reloading.
+  useEffect(() => {
+    if (!isBackendPartner || !partnerId) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      deliveryApi
+        .orders(partnerId)
+        .then(setBackendJobs)
+        .catch((error) => {
+          if (error instanceof SessionExpiredError) sessionExpired();
+        });
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [isBackendPartner, partnerId, sessionExpired]);
+
+  // While carrying an order (picked up or out for delivery), share the partner's position about every
+  // 30 seconds for live tracking. Nothing is sent at other times, or if the browser's location is off.
+  const carrying = isBackendPartner && backendJobs.some((j) => j.status === "picked_up" || j.status === "out_for_delivery");
+  useEffect(() => {
+    if (!carrying || typeof navigator === "undefined" || !navigator.geolocation) return;
+    let lastSent = 0;
+    const watch = navigator.geolocation.watchPosition(
+      (position) => {
+        if (Date.now() - lastSent < 30_000) return;
+        lastSent = Date.now();
+        void deliveryApi.sendLocation(position.coords.latitude, position.coords.longitude).catch(() => undefined);
+      },
+      () => undefined, // location denied or unavailable: deliveries work the same without it
+      { enableHighAccuracy: true, maximumAge: 15_000, timeout: 20_000 }
+    );
+    return () => navigator.geolocation.clearWatch(watch);
+  }, [carrying]);
+
   const assignedJobs = useMemo(
     () => (partnerId ? getAssignedJobs(currentJobs, partnerId) : []),
     [currentJobs, partnerId]
@@ -202,6 +241,38 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
         });
     },
     [applyResult, backendJobs, isBackendPartner, jobs, partnerId, reloadJobs, sessionExpired]
+  );
+
+  const acceptPickup = useCallback(
+    async (orderId: string): Promise<{ error: string | null; taken?: boolean; job?: DeliveryJob }> => {
+      if (!partnerId || !isBackendPartner) return { error: NOT_FOR_BACKEND };
+      try {
+        const job = await deliveryApi.acceptPickup(partnerId, orderId);
+        setBackendJobs((prev) => [job, ...prev.filter((j) => j.id !== job.id)]);
+        return { error: null, job };
+      } catch (error) {
+        if (error instanceof SessionExpiredError) sessionExpired();
+        const taken = error instanceof ApiRequestError && error.status === 409;
+        return { error: error instanceof Error ? error.message : "The pickup couldn't be accepted.", taken };
+      }
+    },
+    [isBackendPartner, partnerId, sessionExpired]
+  );
+
+  const releaseJob = useCallback(
+    async (jobId: string, reason: string): Promise<string | null> => {
+      if (!partnerId || !isBackendPartner) return NOT_FOR_BACKEND;
+      try {
+        await deliveryApi.releasePickup(jobId, reason);
+        setBackendJobs((prev) => prev.filter((j) => j.id !== jobId));
+        return null;
+      } catch (error) {
+        if (error instanceof SessionExpiredError) sessionExpired();
+        reloadJobs();
+        return error instanceof Error ? error.message : "The pickup couldn't be released.";
+      }
+    },
+    [isBackendPartner, partnerId, reloadJobs, sessionExpired]
   );
 
   const failJob = useCallback(
@@ -293,6 +364,8 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
     reloadJobs,
     getJob,
     updateStatus,
+    acceptPickup,
+    releaseJob,
     failJob,
     reattemptJob,
     returnJob,

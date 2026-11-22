@@ -33,6 +33,15 @@ export function DeliveryJobDetails({ job }: { job: DeliveryJob }) {
         <DeliveryStatusBadge status={job.status} />
       </div>
 
+      {job.source === "backend" && (
+        <p className="text-sm text-app-muted">
+          {job.payment_method === "cod" && (job.amount_to_collect ?? 0) > 0
+            ? `Cash on delivery: collect ₹${(job.amount_to_collect ?? 0).toLocaleString("en-IN")} from the customer.`
+            : "Paid online: nothing to collect."}
+          {job.status === "assigned" ? (job.packed ? " The seller has packed it." : " The seller is still packing it.") : ""}
+        </p>
+      )}
+
       <section aria-labelledby="actions-heading" className="flex flex-col gap-2">
         <h2 id="actions-heading" className="text-sm font-semibold text-app-text">
           Available action

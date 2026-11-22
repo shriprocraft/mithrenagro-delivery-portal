@@ -15,7 +15,7 @@ export default function DeliveryEntryPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (isSignedIn) router.replace("/delivery/jobs");
+    if (isSignedIn) router.replace("/delivery/pickups");
   }, [isSignedIn, router]);
 
   // While a stored session is restored (or once signed in), the page redirects to the jobs list.

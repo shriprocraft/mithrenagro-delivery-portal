@@ -4,10 +4,11 @@ import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { Spinner } from "@/components/ui/Spinner";
-import { PackageIcon, HistoryIcon, UserIcon } from "@/components/ui/icons";
+import { PackageIcon, HistoryIcon, UserIcon, MapPinIcon } from "@/components/ui/icons";
 
 const NAV_ITEMS = [
-  { href: "/delivery/jobs", label: "Jobs", icon: PackageIcon },
+  { href: "/delivery/pickups", label: "Pickups", icon: MapPinIcon },
+  { href: "/delivery/jobs", label: "My jobs", icon: PackageIcon },
   { href: "/delivery/history", label: "History", icon: HistoryIcon },
   { href: "/delivery/profile", label: "Profile", icon: UserIcon },
 ] as const;

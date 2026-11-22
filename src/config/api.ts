@@ -5,9 +5,8 @@
  * on port 8000. Every request goes through apiUrl() / apiFetch(), so changing the backend is a
  * one-line config change.
  *
- * The portal still runs on demo data (src/services/delivery-service.ts and mock-auth.ts): the
- * backend has no delivery-partner endpoints yet. DELIVERY_API lists the endpoints the screens
- * will need, so each mock call can be swapped for apiFetch() once they exist.
+ * Registered partners use the backend (src/services/delivery-api.ts); demo partners keep the local
+ * demo data (src/services/delivery-service.ts and mock-auth.ts).
  */
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
@@ -77,6 +76,10 @@ export const DELIVERY_API = {
   refresh: "/delivery/auth/refresh", //             POST  {refresh_token} -> new token pair
   logout: "/delivery/auth/logout", //               POST  {refresh_token}                 (sign out)
   me: "/delivery/auth/me", //                       GET   partner profile (restores the session on reload)
+  pickups: "/delivery/pickups", //                  GET   approved orders in the partner's zones nobody has accepted
+  acceptPickup: (id: string) => `/delivery/pickups/${encodeURIComponent(id)}/accept`, // POST first to accept gets it (409 if taken)
+  releasePickup: (id: string) => `/delivery/orders/${encodeURIComponent(id)}/release`, // POST {reason} before picking it up
+  location: "/delivery/location", //                PATCH {latitude, longitude} while carrying an order
   orders: "/delivery/orders", //                    GET   ?status=&limit=&offset= -> the partner's orders (/delivery/jobs, /history)
   order: (id: string) => `/delivery/orders/${encodeURIComponent(id)}`, //              GET   one order in full; 403 if not assigned
   orderStatus: (id: string) => `/delivery/orders/${encodeURIComponent(id)}/status`, // PATCH {status, expected_status}

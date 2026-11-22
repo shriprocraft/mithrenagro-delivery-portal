@@ -58,4 +58,33 @@ export interface DeliveryJob {
   source?: "backend";
   next_statuses?: DeliveryStatus[];
   payment_method?: "online" | "cod";
+  // Backend orders: the seller has packed it (it can be picked up), cash to collect at the door (₹),
+  // and why it was cancelled when the seller or customer cancelled it after the partner accepted.
+  packed?: boolean;
+  amount_to_collect?: number;
+  cancel_reason?: string;
+}
+
+/** An approved order from a shop in the partner's zones that no partner has accepted yet. */
+export interface PickupOffer {
+  orderId: string;
+  orderNumber: string;
+  packed: boolean;
+  approvedAt: string | null;
+  itemCount: number;
+  total: number;
+  amountToCollect: number;
+  paymentMethod: "online" | "cod";
+  shopName: string;
+  pickupAddress: string;
+  pickupPincode: string | null;
+  dropoffArea: string;
+}
+
+export interface PickupBoard {
+  offers: PickupOffer[];
+  // The pincodes the partner's zones cover (empty: no zone assigned yet).
+  pincodes: string[];
+  activeJobs: number;
+  maxActiveJobs: number;
 }
