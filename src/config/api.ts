@@ -5,8 +5,7 @@
  * on port 8000. Every request goes through apiUrl() / apiFetch(), so changing the backend is a
  * one-line config change.
  *
- * Registered partners use the backend (src/services/delivery-api.ts); demo partners keep the local
- * demo data (src/services/delivery-service.ts and mock-auth.ts).
+ * Partners sign in on the backend (src/services/delivery-api.ts); there is no demo mode.
  */
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
@@ -76,6 +75,9 @@ export const DELIVERY_API = {
   refresh: "/delivery/auth/refresh", //             POST  {refresh_token} -> new token pair
   logout: "/delivery/auth/logout", //               POST  {refresh_token}                 (sign out)
   me: "/delivery/auth/me", //                       GET   partner profile (restores the session on reload)
+  changePassword: "/delivery/auth/change-password", // POST {current_password, new_password} -> tokens + profile (first sign-in)
+  forgotPassword: "/delivery/auth/forgot-password", // POST {email} -> emails a 6-digit reset code
+  resetPassword: "/delivery/auth/reset-password", //  POST {email, otp, new_password}
   pickups: "/delivery/pickups", //                  GET   approved orders in the partner's zones nobody has accepted
   acceptPickup: (id: string) => `/delivery/pickups/${encodeURIComponent(id)}/accept`, // POST first to accept gets it (409 if taken)
   releasePickup: (id: string) => `/delivery/orders/${encodeURIComponent(id)}/release`, // POST {reason} before picking it up

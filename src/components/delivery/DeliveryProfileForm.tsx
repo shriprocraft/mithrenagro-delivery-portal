@@ -2,8 +2,7 @@ import type { ReactNode } from "react";
 import type { DeliveryPartnerProfile } from "@/types/delivery";
 import { PartnerAvailabilityControl } from "@/components/delivery/PartnerAvailabilityControl";
 import { Badge } from "@/components/ui/Badge";
-import { MailIcon, PhoneIcon, TruckIcon, UserIcon } from "@/components/ui/icons";
-import { getDemoAccountEmail } from "@/services/mock-auth";
+import { MailIcon, MapPinIcon, PhoneIcon, TruckIcon, UserIcon } from "@/components/ui/icons";
 
 function getInitials(name: string): string {
   return name
@@ -28,7 +27,7 @@ function InfoRow({ icon, label, children }: { icon: ReactNode; label: string; ch
   );
 }
 
-// Shows only fields that exist in the mock partner data — nothing invented to fill space.
+// The details the Super Admin entered for the partner. Read-only here: changes go through Mithren Agro.
 // `accountSection` sits under Availability so both desktop columns balance without stretching.
 export function DeliveryProfileForm({
   partner,
@@ -38,7 +37,8 @@ export function DeliveryProfileForm({
   accountSection?: ReactNode;
 }) {
   const available = partner.availability_status === "available";
-  const email = getDemoAccountEmail(partner.id);
+  const email = partner.email;
+  const vehicle = [partner.vehicle_type, partner.vehicle_number].filter(Boolean).join(" · ");
 
   return (
     <div className="flex flex-col gap-4">
@@ -83,11 +83,14 @@ export function DeliveryProfileForm({
                 {email}
               </InfoRow>
             )}
-            {partner.vehicle_type && (
+            {vehicle && (
               <InfoRow icon={<TruckIcon className="h-4 w-4" />} label="Vehicle">
-                {partner.vehicle_type}
+                {vehicle}
               </InfoRow>
             )}
+            <InfoRow icon={<MapPinIcon className="h-4 w-4" />} label="Delivery PIN codes">
+              {partner.pincodes && partner.pincodes.length ? partner.pincodes.join(", ") : "Not assigned yet. Contact Mithren Agro."}
+            </InfoRow>
             <InfoRow icon={<UserIcon className="h-4 w-4" />} label="Partner ID">
               {partner.id}
             </InfoRow>

@@ -1,11 +1,17 @@
 import { ApiRequestError, apiFetch, DELIVERY_API } from "@/config/api";
 import type { DeliveryJob, DeliveryStatus, PickupBoard } from "@/types/delivery";
-import type { DeliveryPartnerProfile as BackendPartnerProfile } from "@/services/delivery-registration";
+import {
+  ACCOUNT_SUSPENDED,
+  isAccountBlocked,
+  type DeliveryAuthResponse,
+  type DeliveryPartnerProfile as BackendPartnerProfile,
+} from "@/services/delivery-registration";
 
 /**
  * The signed-in session, kept in localStorage so it survives page reloads until the partner signs out:
  * - mithren.delivery.tokens: the backend access and refresh tokens (registered partners);
- * - mithren.delivery.session: who is signed in (a registered partner's profile, or a demo partner id).
+ * - mithren.delivery.session: who is signed in (the partner's profile).
+ * - mithren.delivery.notice (session storage): a message for the sign-in screen, e.g. a suspension.
  * Every read and write is guarded: private browsing or blocked storage just means no persistence.
  */
 const TOKENS_KEY = "mithren.delivery.tokens";
@@ -57,8 +63,37 @@ export function clearStoredSession() {
 
 /** The backend no longer accepts the session (refresh token expired or revoked): sign in again. */
 export class SessionExpiredError extends Error {
+  constructor(message = "Your session has expired. Sign in again.") {
+    super(message);
+  }
+}
+
+/** The Super Admin suspended the account: the session ends and the sign-in screen says why. */
+export class AccountBlockedError extends SessionExpiredError {
   constructor() {
-    super("Your session has expired. Sign in again.");
+    super(ACCOUNT_SUSPENDED);
+  }
+}
+
+const NOTICE_KEY = "mithren.delivery.notice";
+
+/** Leaves a message for the sign-in screen (shown once). */
+export function setSignInNotice(message: string) {
+  try {
+    sessionStorage.setItem(NOTICE_KEY, message);
+  } catch {
+    /* storage unavailable: the toast still says it */
+  }
+}
+
+/** The message left for the sign-in screen, if any; reading it clears it. */
+export function takeSignInNotice(): string | null {
+  try {
+    const message = sessionStorage.getItem(NOTICE_KEY);
+    sessionStorage.removeItem(NOTICE_KEY);
+    return message;
+  } catch {
+    return null;
   }
 }
 
@@ -93,13 +128,26 @@ async function authFetch<T>(path: string, options: { method?: string; body?: unk
   try {
     return await apiFetch<T>(path, { ...options, token: tokens.access });
   } catch (error) {
+    if (error instanceof ApiRequestError && isAccountBlocked(error)) return blocked();
     if (!(error instanceof ApiRequestError) || error.status !== 401) throw error;
     if (!(await refreshTokens())) {
       clearStoredSession();
       throw new SessionExpiredError();
     }
-    return apiFetch<T>(path, { ...options, token: readTokens()!.access });
+    try {
+      return await apiFetch<T>(path, { ...options, token: readTokens()!.access });
+    } catch (retryError) {
+      if (retryError instanceof ApiRequestError && isAccountBlocked(retryError)) return blocked();
+      throw retryError;
+    }
   }
+}
+
+/** Suspended by the Super Admin: forget the session at once. */
+function blocked(): never {
+  clearStoredSession();
+  setSignInNotice(ACCOUNT_SUSPENDED);
+  throw new AccountBlockedError();
 }
 
 // ---------- orders ----------
@@ -192,6 +240,16 @@ interface BackendPickupPage {
 
 export const deliveryApi = {
   me: () => authFetch<BackendPartnerProfile>(DELIVERY_API.me),
+
+  /** First sign-in: replaces the password the Super Admin issued. Keeps the fresh tokens. */
+  async changePassword(currentPassword: string, newPassword: string): Promise<BackendPartnerProfile> {
+    const response = await authFetch<DeliveryAuthResponse>(DELIVERY_API.changePassword, {
+      method: "POST",
+      body: { current_password: currentPassword, new_password: newPassword },
+    });
+    saveTokens(response);
+    return response.partner;
+  },
 
   /** Every order assigned to the partner (active and completed), newest first. */
   async orders(partnerId: string): Promise<DeliveryJob[]> {

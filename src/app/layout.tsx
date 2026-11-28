@@ -10,9 +10,9 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
-  title: "Mithren Agro — Delivery Partner Portal (Demo)",
+  title: "Mithren Agro — Delivery Partner Portal",
   description:
-    "Frontend-only demo of the Mithren Agro delivery partner portal. All data is simulated.",
+    "Mithren Agro delivery partner portal: pickups, deliveries and availability for partners registered by Mithren Agro.",
   robots: { index: false, follow: false },
 };
 

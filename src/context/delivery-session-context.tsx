@@ -14,7 +14,7 @@ import type { ToastMessage, ToastTone } from "@/components/feedback/Toast";
 import { demoDeliveryPartners } from "@/data/delivery-partner";
 import { demoDeliveryJobs } from "@/data/delivery-jobs";
 import { logoutDeliveryPartner, type DeliveryPartnerProfile as BackendPartnerProfile } from "@/services/delivery-registration";
-import { deliveryApi, readSession, saveSession, SessionExpiredError } from "@/services/delivery-api";
+import { AccountBlockedError, clearStoredSession, deliveryApi, readSession, saveSession, SessionExpiredError } from "@/services/delivery-api";
 import { ApiRequestError } from "@/config/api";
 import {
   getAssignedJobs,
@@ -32,9 +32,13 @@ interface DeliverySessionValue {
   // doesn't bounce a signed-in partner to the sign-in screen.
   restoring: boolean;
   isSignedIn: boolean;
-  // A registered partner signed in on the backend (real orders), as opposed to a demo partner.
+  // Always true for a signed-in partner: every partner signs in on the backend (there is no demo mode).
   isBackendPartner: boolean;
   partner: DeliveryPartnerProfile | undefined;
+  // The Super Admin issued the password: the partner must set a new one before using the app.
+  mustChangePassword: boolean;
+  // After the new password is saved: the updated profile from POST /delivery/auth/change-password.
+  completePasswordChange: (profile: BackendPartnerProfile) => void;
   assignedJobs: DeliveryJob[];
   historyJobs: DeliveryJob[];
   // Registered partners' orders come from the backend.
@@ -52,8 +56,7 @@ interface DeliverySessionValue {
   returnJob: (jobId: string) => MockActionResult;
   // Resolves to an error message, or null when the change was saved.
   toggleAvailability: () => Promise<string | null>;
-  signIn: (partnerId: string) => boolean;
-  // Starts a session for a partner who signed in on the backend (registered accounts).
+  // Starts a session for a partner who signed in on the backend.
   signInPartner: (profile: BackendPartnerProfile) => void;
   signOut: () => void;
   // App-wide toast, rendered by the app shell and the sign-in screen. Living here (not in
@@ -74,7 +77,10 @@ function toPartner(profile: BackendPartnerProfile): DeliveryPartnerProfile {
     id: profile.partner_id,
     name: profile.full_name,
     phone: profile.phone,
-    vehicle_type: { bike: "Bike", scooter: "Scooter", ev: "EV" }[profile.vehicle_type],
+    email: profile.email ?? undefined,
+    vehicle_type: profile.vehicle_type ? { bike: "Bike", scooter: "Scooter", ev: "EV" }[profile.vehicle_type] : undefined,
+    vehicle_number: profile.vehicle_number ?? undefined,
+    pincodes: profile.pincodes ?? [],
     availability_status: profile.availability_status,
   };
 }
@@ -86,6 +92,7 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
   const [restoring, setRestoring] = useState(true);
   const [partnerId, setPartnerId] = useState<string | null>(null);
   const [isBackendPartner, setIsBackendPartner] = useState(false);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [partners, setPartners] = useState<DeliveryPartnerProfile[]>(demoDeliveryPartners);
   const [jobs, setJobs] = useState<DeliveryJob[]>(demoDeliveryJobs);
@@ -104,6 +111,7 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
   const endSession = useCallback(() => {
     setPartnerId(null);
     setIsBackendPartner(false);
+    setMustChangePassword(false);
     setBackendJobs([]);
     setJobsError(null);
     void logoutDeliveryPartner();
@@ -114,28 +122,32 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
     setPartners((prev) => [...prev.filter((p) => p.id !== next.id), next]);
     setPartnerId(next.id);
     setIsBackendPartner(true);
+    setMustChangePassword(profile.must_change_password === true);
     saveSession({ kind: "backend", profile });
   }, []);
 
-  // The backend no longer accepts the session: sign out and say why.
-  const sessionExpired = useCallback(() => {
-    endSession();
-    showToast("Your session has expired. Sign in again.", "error");
-  }, [endSession, showToast]);
+  // The backend no longer accepts the session (expired, or the account was suspended): sign out and say why.
+  const sessionExpired = useCallback(
+    (error?: unknown) => {
+      endSession();
+      showToast(error instanceof AccountBlockedError ? error.message : "Your session has expired. Sign in again.", "error");
+    },
+    [endSession, showToast]
+  );
 
   // Restore a stored session on page load. A registered partner's profile is shown at once and then
   // refreshed from the backend (GET /delivery/auth/me), which also checks the session is still valid.
   useEffect(() => {
     const stored = readSession();
-    if (stored?.kind === "demo" && demoDeliveryPartners.some((p) => p.id === stored.partnerId)) {
-      setPartnerId(stored.partnerId);
+    if (stored?.kind === "demo") {
+      clearStoredSession(); // demo mode has been removed
     } else if (stored?.kind === "backend") {
       applyBackendProfile(stored.profile);
       deliveryApi
         .me()
         .then(applyBackendProfile)
         .catch((error) => {
-          if (error instanceof SessionExpiredError) sessionExpired();
+          if (error instanceof SessionExpiredError) sessionExpired(error);
           // Other errors (server unreachable): keep the stored session and try again on the next request.
         });
     }
@@ -144,7 +156,8 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
 
   // Registered partners: load their orders whenever they sign in or ask to refresh.
   useEffect(() => {
-    if (!isBackendPartner || !partnerId) return;
+    // Nothing loads until the issued password is replaced (the backend refuses it too).
+    if (!isBackendPartner || !partnerId || mustChangePassword) return;
     let cancelled = false;
     setJobsLoading(true);
     setJobsError(null);
@@ -155,7 +168,7 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
       })
       .catch((error) => {
         if (cancelled) return;
-        if (error instanceof SessionExpiredError) sessionExpired();
+        if (error instanceof SessionExpiredError) sessionExpired(error);
         else setJobsError(error instanceof Error ? error.message : "Your deliveries couldn't be loaded.");
       })
       .finally(() => {
@@ -164,25 +177,26 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [isBackendPartner, partnerId, jobsVersion, sessionExpired]);
+  }, [isBackendPartner, partnerId, mustChangePassword, jobsVersion, sessionExpired]);
 
   const reloadJobs = useCallback(() => setJobsVersion((v) => v + 1), []);
 
   // Registered partners: refresh their deliveries every 15 seconds while the page is visible, so a seller
   // packing an order, or cancelling it, shows up without reloading.
   useEffect(() => {
-    if (!isBackendPartner || !partnerId) return;
+    // Nothing loads until the issued password is replaced (the backend refuses it too).
+    if (!isBackendPartner || !partnerId || mustChangePassword) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       deliveryApi
         .orders(partnerId)
         .then(setBackendJobs)
         .catch((error) => {
-          if (error instanceof SessionExpiredError) sessionExpired();
+          if (error instanceof SessionExpiredError) sessionExpired(error);
         });
     }, 15_000);
     return () => window.clearInterval(timer);
-  }, [isBackendPartner, partnerId, sessionExpired]);
+  }, [isBackendPartner, partnerId, mustChangePassword, sessionExpired]);
 
   // While carrying an order (picked up or out for delivery), share the partner's position about every
   // 30 seconds for live tracking. Nothing is sent at other times, or if the browser's location is off.
@@ -234,7 +248,7 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
           return { jobs: [], job: updated };
         })
         .catch((error) => {
-          if (error instanceof SessionExpiredError) sessionExpired();
+          if (error instanceof SessionExpiredError) sessionExpired(error);
           // The order may have changed elsewhere: reload so the screen shows its real status.
           else reloadJobs();
           return { jobs: [], error: error instanceof Error ? error.message : "The status couldn't be updated." };
@@ -251,7 +265,7 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
         setBackendJobs((prev) => [job, ...prev.filter((j) => j.id !== job.id)]);
         return { error: null, job };
       } catch (error) {
-        if (error instanceof SessionExpiredError) sessionExpired();
+        if (error instanceof SessionExpiredError) sessionExpired(error);
         const taken = error instanceof ApiRequestError && error.status === 409;
         return { error: error instanceof Error ? error.message : "The pickup couldn't be accepted.", taken };
       }
@@ -267,7 +281,7 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
         setBackendJobs((prev) => prev.filter((j) => j.id !== jobId));
         return null;
       } catch (error) {
-        if (error instanceof SessionExpiredError) sessionExpired();
+        if (error instanceof SessionExpiredError) sessionExpired(error);
         reloadJobs();
         return error instanceof Error ? error.message : "The pickup couldn't be released.";
       }
@@ -318,7 +332,7 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
       applyBackendProfile(await deliveryApi.setAvailability(next));
       return null;
     } catch (error) {
-      if (error instanceof SessionExpiredError) sessionExpired();
+      if (error instanceof SessionExpiredError) sessionExpired(error);
       return error instanceof Error ? error.message : "Availability couldn't be updated.";
     }
   }, [applyBackendProfile, isBackendPartner, partner, sessionExpired]);
@@ -336,18 +350,12 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
     [applyBackendProfile, showToast]
   );
 
-  // Starts a session for an explicit demo partner. Credential checks live in
-  // src/services/mock-auth.ts; this only accepts IDs that exist in the demo fixtures.
-  const signIn = useCallback(
-    (nextPartnerId: string) => {
-      if (!partners.some((p) => p.id === nextPartnerId)) return false;
-      setIsBackendPartner(false);
-      setPartnerId(nextPartnerId);
-      saveSession({ kind: "demo", partnerId: nextPartnerId });
-      showToast("Signed in to the demo session.");
-      return true;
+  const completePasswordChange = useCallback(
+    (profile: BackendPartnerProfile) => {
+      applyBackendProfile(profile);
+      showToast("Your new password is saved.");
     },
-    [partners, showToast]
+    [applyBackendProfile, showToast]
   );
 
   const clearToast = useCallback(() => setToast(null), []);
@@ -357,6 +365,8 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
     isSignedIn: partnerId !== null,
     isBackendPartner,
     partner,
+    mustChangePassword,
+    completePasswordChange,
     assignedJobs,
     historyJobs,
     jobsLoading,
@@ -370,7 +380,6 @@ export function DeliverySessionProvider({ children }: { children: ReactNode }) {
     reattemptJob,
     returnJob,
     toggleAvailability,
-    signIn,
     signInPartner,
     signOut,
     toast,

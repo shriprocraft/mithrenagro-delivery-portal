@@ -1,12 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { useDeliverySession } from "@/context/delivery-session-context";
 import { EyeIcon, EyeOffIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
-import { simulateLatency } from "@/lib/simulated-latency";
-import { findDemoPartnerId } from "@/services/mock-auth";
 import { loginDeliveryPartner, normalizeEmail, RegistrationError } from "@/services/delivery-registration";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -27,7 +26,7 @@ function validate(email: string, password: string): FieldErrors {
 const inputClasses =
   "w-full rounded-md border bg-surface px-3 py-2.5 text-sm text-app-text placeholder:text-app-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
 
-export function DeliveryLoginForm({ onSignIn }: { onSignIn: (partnerId: string) => boolean }) {
+export function DeliveryLoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -49,16 +48,9 @@ export function DeliveryLoginForm({ onSignIn }: { onSignIn: (partnerId: string) 
     }
 
     setSubmitting(true);
-    const normalized = normalizeEmail(email);
-    // The built-in demo accounts sign in locally (src/services/mock-auth.ts) ...
-    const demoPartnerId = findDemoPartnerId(normalized, password);
-    if (demoPartnerId) {
-      await simulateLatency();
-      if (onSignIn(demoPartnerId)) return; // the entry page redirects
-    }
-    // ... and registered partners sign in on the backend, with any email case or domain.
+    // Partners sign in with the email the Super Admin registered (any case, any domain).
     try {
-      signInPartner(await loginDeliveryPartner(normalized, password));
+      signInPartner(await loginDeliveryPartner(normalizeEmail(email), password));
       // On success the entry page redirects, so the button stays in its loading state.
     } catch (error) {
       const message = error instanceof RegistrationError ? error.message : "Sign-in failed. Please try again.";
@@ -84,7 +76,7 @@ export function DeliveryLoginForm({ onSignIn }: { onSignIn: (partnerId: string) 
           id="login-email"
           type="email"
           autoComplete="email"
-          placeholder="arjunagro@gmail.com"
+          placeholder="Enter your email address"
           value={email}
           onChange={(event) => {
             setEmail(event.target.value);
@@ -112,7 +104,7 @@ export function DeliveryLoginForm({ onSignIn }: { onSignIn: (partnerId: string) 
             id="login-password"
             type={showPassword ? "text" : "password"}
             autoComplete="current-password"
-            placeholder="demo123"
+            placeholder="Enter your password"
             value={password}
             onChange={(event) => {
               setPassword(event.target.value);
@@ -140,7 +132,16 @@ export function DeliveryLoginForm({ onSignIn }: { onSignIn: (partnerId: string) 
         )}
       </div>
 
-      <Button type="submit" className="mt-2 w-full" loading={submitting}>
+      <div className="-mt-1 text-right">
+        <Link
+          href="/delivery/forgot-password"
+          className="text-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          Forgot password?
+        </Link>
+      </div>
+
+      <Button type="submit" className="mt-1 w-full" loading={submitting}>
         {submitting ? "Signing in…" : "Sign In"}
       </Button>
     </form>

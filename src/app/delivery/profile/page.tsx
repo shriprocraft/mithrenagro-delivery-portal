@@ -39,7 +39,7 @@ export default function DeliveryProfilePage() {
                   Account
                 </h2>
                 <p className="text-xs text-app-muted">
-                  You are signed in to a local demo session. Signing out returns you to the sign-in screen.
+                  Signing out returns you to the sign-in screen.
                 </p>
               </div>
               <Button
@@ -49,13 +49,13 @@ export default function DeliveryProfilePage() {
                 className="self-start border border-danger/30 text-danger hover:bg-danger/5"
               >
                 {!signingOut && <LogOutIcon className="h-4 w-4" />}
-                {signingOut ? "Signing out…" : "Sign out of demo session"}
+                {signingOut ? "Signing out…" : "Sign out"}
               </Button>
             </section>
           }
         />
       ) : (
-        <EmptyState title="No active demo partner" description="Sign in again from the delivery entry screen." />
+        <EmptyState title="You are signed out" description="Sign in again from the sign-in screen." />
       )}
     </DeliveryAppShell>
   );

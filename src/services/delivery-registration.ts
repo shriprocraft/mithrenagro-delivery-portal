@@ -28,20 +28,32 @@ export interface DeliveryPartnerProfile {
   partner_id: string;
   user_id: string;
   full_name: string;
-  email: string;
+  // Partners are created by the Super Admin, who may leave the optional details empty.
+  email: string | null;
   phone: string;
-  vehicle_type: VehicleType;
-  vehicle_number: string;
-  driving_license_number: string;
-  bank_account_last4: string;
-  ifsc_code: string;
-  identity_type: IdentityType;
-  identity_last4: string;
+  vehicle_type: VehicleType | null;
+  vehicle_number: string | null;
+  driving_license_number: string | null;
+  bank_account_last4: string | null;
+  ifsc_code: string | null;
+  identity_type: IdentityType | null;
+  identity_last4: string | null;
   approval_status: "pending" | "approved" | "rejected";
   availability_status: "available" | "unavailable";
+  account_status?: "active" | "suspended";
+  // The Super Admin issued the password: the app asks for a new one before anything else.
+  must_change_password?: boolean;
+  pincodes?: string[];
 }
 
-interface DeliveryAuthResponse {
+/** Shown on the sign-in screen when the Super Admin has suspended the account. */
+export const ACCOUNT_SUSPENDED = "Account suspended — contact Super Admin.";
+
+/** A 403 from sign-in or any request: the account is suspended (or not active). */
+export const isAccountBlocked = (error: ApiRequestError) =>
+  error.status === 403 && /suspended|not active/i.test(error.message);
+
+export interface DeliveryAuthResponse {
   access_token: string;
   refresh_token: string;
   token_type: "bearer";
@@ -82,21 +94,55 @@ export async function registerDeliveryPartner(input: DeliveryRegistrationInput):
   }
 }
 
-/** POST /delivery/auth/login with an email (any case) or mobile number; keeps the tokens. */
-export async function loginDeliveryPartner(identifier: string, password: string): Promise<DeliveryPartnerProfile> {
-  const id = identifier.includes("@") ? normalizeEmail(identifier) : identifier.trim();
+/** POST /delivery/auth/login with the email the Super Admin registered; keeps the tokens. */
+export async function loginDeliveryPartner(email: string, password: string): Promise<DeliveryPartnerProfile> {
   try {
     const response = await apiFetch<DeliveryAuthResponse>(DELIVERY_API.login, {
       method: "POST",
-      body: { identifier: id, password },
+      body: { identifier: normalizeEmail(email), password },
     });
     saveTokens(response);
     return response.partner;
   } catch (error) {
     if (!(error instanceof ApiRequestError)) throw unreachable();
     if (error.status === 401) throw new RegistrationError("Email or password is incorrect.");
+    if (isAccountBlocked(error)) throw new RegistrationError(ACCOUNT_SUSPENDED);
     throw new RegistrationError(error.message || "Sign-in failed. Please try again.");
   }
+}
+
+/** POST /delivery/auth/forgot-password: emails a 6-digit code (the answer never says whether the email exists). */
+export async function requestPasswordReset(email: string): Promise<number> {
+  try {
+    const r = await apiFetch<{ sent: boolean; expiresInSeconds: number }>(DELIVERY_API.forgotPassword, {
+      method: "POST",
+      body: { email: normalizeEmail(email) },
+    });
+    return r.expiresInSeconds;
+  } catch (error) {
+    if (!(error instanceof ApiRequestError)) throw unreachable();
+    throw new RegistrationError(error.message || "The code couldn't be sent. Please try again.");
+  }
+}
+
+/** POST /delivery/auth/reset-password with the emailed code. */
+export async function resetPassword(email: string, otp: string, newPassword: string): Promise<void> {
+  try {
+    await apiFetch(DELIVERY_API.resetPassword, {
+      method: "POST",
+      body: { email: normalizeEmail(email), otp: otp.trim(), new_password: newPassword },
+    });
+  } catch (error) {
+    if (!(error instanceof ApiRequestError)) throw unreachable();
+    throw new RegistrationError(error.message || "The password couldn't be reset. Please try again.");
+  }
+}
+
+/** The app's rule for a new password, the same as the backend's: 10+ characters with letters and numbers. */
+export function passwordProblem(password: string): string | null {
+  if (password.length < 10) return "Use at least 10 characters.";
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) return "Use both letters and numbers.";
+  return null;
 }
 
 /** Ends the server session (best effort) and forgets the stored session. */

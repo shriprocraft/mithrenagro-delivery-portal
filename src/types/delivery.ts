@@ -26,7 +26,11 @@ export interface DeliveryPartnerProfile {
   id: string;
   name: string;
   phone?: string;
+  email?: string;
   vehicle_type?: string;
+  vehicle_number?: string;
+  // The pincodes the partner delivers to (set by the Super Admin).
+  pincodes?: string[];
   availability_status: "available" | "unavailable";
 }
 

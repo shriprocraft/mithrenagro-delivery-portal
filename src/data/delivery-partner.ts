@@ -1,8 +1,7 @@
 import type { DeliveryPartnerProfile } from "@/types/delivery";
 
-// The active demo partner is whichever account signs in on /delivery (see
-// src/data/demo-partner-accounts.ts). A second fictional partner exists to prove
-// job/history isolation — their jobs must never appear for another partner.
+// Fictional fixtures kept for the job screens' local helpers. They are never signed in: demo sign-in has
+// been removed, and every partner signs in on the backend.
 
 export const demoDeliveryPartners: DeliveryPartnerProfile[] = [
   {
