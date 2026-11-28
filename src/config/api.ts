@@ -18,6 +18,10 @@ export function apiUrl(path: string): string {
   return `${API_BASE_URL}${API_PREFIX}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+// Free ngrok tunnels answer browser GET requests with their own HTML warning page unless this header is
+// sent; with it, requests reach the backend. Harmless when the backend isn't behind ngrok.
+const BACKEND_HEADERS = { "ngrok-skip-browser-warning": "true" } as const;
+
 export class ApiRequestError extends Error {
   constructor(
     readonly status: number,
@@ -36,6 +40,7 @@ export async function apiFetch<T>(
   const response = await fetch(apiUrl(path), {
     method,
     headers: {
+      ...BACKEND_HEADERS,
       Accept: "application/json",
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -54,7 +59,7 @@ export async function apiFetch<T>(
 /** The backend's liveness check (outside /api/v1). True when the backend answers. */
 export async function backendIsUp(): Promise<boolean> {
   try {
-    return (await fetch(`${API_BASE_URL}/health`)).ok;
+    return (await fetch(`${API_BASE_URL}/health`, { headers: BACKEND_HEADERS })).ok;
   } catch {
     return false;
   }
